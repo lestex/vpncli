@@ -1,0 +1,17 @@
+# Build output
+/vpncli
+/dist/
+
+# Test and coverage artifacts
+*.test
+*.out
+
+# Local state that must never be committed: this is where REALITY key
+# material lands from v0.8.0 onward.
+*.db
+*.db-wal
+*.db-shm
+config.yaml
+
+# Editor / OS
+.DS_Store

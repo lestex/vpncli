@@ -1,5 +1,7 @@
 # vpncli
 
+[![CI](https://github.com/lestex/vpncli/actions/workflows/ci.yml/badge.svg)](https://github.com/lestex/vpncli/actions/workflows/ci.yml)
+
 Provision, rotate and destroy single-user VPN servers on cloud VPS providers,
 configured with VLESS+REALITY (Xray-core).
 
@@ -86,9 +88,20 @@ normalizes that inside its own `WaitReady`.
 ## Development
 
 ```sh
-make check   # vet + test
+make check   # vet + lint + race tests — what CI runs
+make test    # race tests only
+make lint    # golangci-lint (v2.12.2, pinned to match CI)
 make fmt
+make dist    # cross-compiled release archives into dist/
 ```
+
+CI runs on every push: tests on Linux and macOS, lint, a `go mod tidy` check,
+and a cgo-free cross-compile of all four release targets. That last job is
+what protects the static-binary promise — if a cgo dependency ever displaces
+the pure-Go SQLite driver, it fails there rather than at release time.
+
+Releases are cut by pushing a `v*` tag. `make dist` runs the identical build
+locally, so packaging can be rehearsed before the tag goes out.
 
 ## Roadmap
 

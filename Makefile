@@ -5,7 +5,7 @@ LDFLAGS := -s -w -X github.com/lestex/vpncli/internal/cli.version=$(VERSION)
 # cross-compiles without a C toolchain.
 export CGO_ENABLED = 0
 
-.PHONY: build test vet fmt check clean install
+.PHONY: build test vet lint fmt check clean install
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o vpncli .
@@ -16,10 +16,13 @@ test:
 vet:
 	go vet ./...
 
+lint:
+	golangci-lint run ./...
+
 fmt:
 	gofmt -l -w .
 
-check: vet test
+check: vet lint test
 
 install:
 	go install -ldflags "$(LDFLAGS)" .

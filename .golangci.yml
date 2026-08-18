@@ -1,0 +1,40 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - misspell
+    - revive
+    - unconvert
+
+  settings:
+    errcheck:
+      # Cleanup-path closers. Ignoring these is deliberate: the meaningful
+      # error is already being returned, or there is nothing a caller could do
+      # with a failure to release a handle. Real error returns stay checked.
+      exclude-functions:
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*os.File).Close
+        - (*github.com/lestex/vpncli/internal/state.Store).Close
+        - os.Remove
+
+    revive:
+      rules:
+        - name: exported
+        - name: indent-error-flow
+        - name: unreachable-code
+
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # Test helpers assert on the deliberately-ignored paths themselves.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt

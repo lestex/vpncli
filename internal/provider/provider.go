@@ -14,6 +14,8 @@ import (
 // implementation maps into these values so callers see one set.
 type Status string
 
+// The normalized lifecycle states. StatusUnknown is the zero value and means
+// the provider reported something we do not have a mapping for.
 const (
 	StatusUnknown      Status = "unknown"
 	StatusProvisioning Status = "provisioning"

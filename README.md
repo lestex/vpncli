@@ -7,9 +7,10 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v0.1.0 - scaffold.** The command tree, provider interface, config
-> handling and local state store exist. No provider is implemented yet, so
-> nothing can be provisioned. See [Roadmap](#roadmap).
+> **Status: v0.2.0 - read-only DigitalOcean.** The command tree, provider
+> interface, config handling and local state store exist, and
+> `vpncli providers do list` talks to a real DigitalOcean account. Nothing can
+> be provisioned yet. See [Roadmap](#roadmap).
 
 ## Why it is built this way
 
@@ -44,9 +45,24 @@ make build      # produces ./vpncli
 
 ```sh
 vpncli version
-vpncli version --short
 vpncli --help
 ```
+
+List every droplet in a DigitalOcean account, straight from the API:
+
+```sh
+export DIGITALOCEAN_TOKEN=dop_v1_...   # DIGITALOCEAN_ACCESS_TOKEN also works
+vpncli providers do list
+```
+
+```
+ID    NAME              REGION  SIZE                IMAGE             IPV4          STATUS        AGE
+1001  vpncli-fra1-a1b2  fra1    s-1vcpu-1gb         ubuntu-24-04-x64  203.0.113.10  active        2d
+1002  vpncli-ams3-c3d4  ams3    s-1vcpu-512mb-10gb  debian-12-x64     -             provisioning  just now
+```
+
+This is not filtered to servers vpncli created, which is what makes it useful
+for confirming a token works and for spotting drift.
 
 Provisioning commands land in later versions; the full workflow will be:
 
@@ -73,11 +89,12 @@ Both honor `XDG_CONFIG_HOME` / `XDG_DATA_HOME`.
 ## Layout
 
 ```
-main.go                    entry point, signal handling
-internal/cli/              cobra command tree
-internal/provider/         VPSProvider interface and shared types
-internal/config/           config file + XDG paths
-internal/state/            SQLite state store
+main.go                          entry point, signal handling
+internal/cli/                    cobra command tree
+internal/provider/               VPSProvider interface and shared types
+internal/provider/digitalocean/  DigitalOcean implementation
+internal/config/                 config file + XDG paths
+internal/state/                  SQLite state store
 ```
 
 `VPSProvider` is the single seam every cloud goes through. Providers differ in
@@ -107,8 +124,8 @@ locally, so packaging can be rehearsed before the tag goes out.
 
 | Version | Scope |
 | --- | --- |
-| **v0.1.0** | ✅ Scaffold: CLI, provider interface, config, SQLite schema |
-| v0.2.0 | DigitalOcean read-only: `ListInstances` |
+| v0.1.0 | ✅ Scaffold: CLI, provider interface, config, SQLite schema |
+| **v0.2.0** | ✅ DigitalOcean read-only: `ListInstances`, `providers do list` |
 | v0.3.0 | DigitalOcean create/delete, `WaitReady`, 429 backoff |
 | v0.4.0 | State wired into create/delete; `list` and `sync` |
 | v0.5.0 | Wizard: provider + region select |

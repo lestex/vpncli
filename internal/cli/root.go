@@ -21,7 +21,10 @@ time.`,
 		SilenceErrors: true, // main prints the error itself, once
 	}
 
-	root.AddCommand(newVersionCommand())
+	root.AddCommand(
+		newProvidersCommand(),
+		newVersionCommand(),
+	)
 
 	return root
 }

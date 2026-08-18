@@ -13,10 +13,7 @@ func TestLoadMissingFileIsNotAnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFrom on missing file: %v", err)
 	}
-	if cfg == nil {
-		t.Fatal("LoadFrom returned a nil config")
-	}
-	if !reflect.DeepEqual(*cfg, Config{}) {
+	if !reflect.DeepEqual(cfg, Config{}) {
 		t.Errorf("got %+v, want zero Config", cfg)
 	}
 }

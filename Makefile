@@ -8,7 +8,7 @@ LDFLAGS := -s -w -X github.com/lestex/vpncli/internal/cli.version=$(VERSION)
 # target rather than globally because `test` needs the opposite - the race
 # detector requires cgo.
 build:
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o vpncli .
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o vpncli ./cmd/vpncli
 
 test:
 	go test -race -count=1 ./...
@@ -30,7 +30,7 @@ dist:
 	VERSION=$(VERSION) scripts/release.sh
 
 install:
-	CGO_ENABLED=0 go install -ldflags "$(LDFLAGS)" .
+	CGO_ENABLED=0 go install -ldflags "$(LDFLAGS)" ./cmd/vpncli
 
 clean:
 	rm -rf vpncli dist

@@ -84,6 +84,6 @@ jobs:
         run: |
           for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             echo "::group::${platform}"
-            GOOS="${platform%/*}" GOARCH="${platform#*/}" go build -o /dev/null .
+            GOOS="${platform%/*}" GOARCH="${platform#*/}" go build -o /dev/null ./cmd/vpncli
             echo "::endgroup::"
           done

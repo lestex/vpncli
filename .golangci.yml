@@ -20,6 +20,9 @@ linters:
         - (*github.com/lestex/vpncli/internal/state.Store).Close
         - os.Remove
 
+    misspell:
+      locale: US
+
     revive:
       rules:
         - name: exported

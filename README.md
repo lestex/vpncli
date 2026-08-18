@@ -89,7 +89,7 @@ Both honor `XDG_CONFIG_HOME` / `XDG_DATA_HOME`.
 ## Layout
 
 ```
-main.go                          entry point, signal handling
+cmd/vpncli/                      entry point, signal handling
 internal/cli/                    cobra command tree
 internal/provider/               VPSProvider interface and shared types
 internal/provider/digitalocean/  DigitalOcean implementation

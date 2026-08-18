@@ -35,7 +35,7 @@ for platform in $PLATFORMS; do
     echo "building ${GOOS}/${GOARCH}"
     mkdir -p "$staging"
     # -trimpath keeps absolute build paths out of the binary.
-    go build -trimpath -ldflags "$LDFLAGS" -o "${staging}/vpncli" .
+    go build -trimpath -ldflags "$LDFLAGS" -o "${staging}/vpncli" ./cmd/vpncli
     cp README.md LICENSE "$staging/"
 
     tar -czf "${staging}.tar.gz" -C "$DIST" "$name"

@@ -94,29 +94,29 @@ func DatabasePath() (string, error) {
 
 // Load reads the config file. A missing file yields a zero Config and no
 // error, since not having run the wizard yet is a normal state.
-func Load() (*Config, error) {
+func Load() (Config, error) {
 	path, err := Path()
 	if err != nil {
-		return nil, err
+		return Config{}, err
 	}
 	return LoadFrom(path)
 }
 
 // LoadFrom reads a config file from an explicit path.
-func LoadFrom(path string) (*Config, error) {
+func LoadFrom(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &Config{}, nil
+		return Config{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("reading config %s: %w", path, err)
+		return Config{}, fmt.Errorf("reading config %s: %w", path, err)
 	}
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config %s: %w", path, err)
+		return Config{}, fmt.Errorf("parsing config %s: %w", path, err)
 	}
-	return &cfg, nil
+	return cfg, nil
 }
 
 // Save writes the config to the default path, creating the directory. The file

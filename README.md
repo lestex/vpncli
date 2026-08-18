@@ -7,7 +7,7 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v0.1.0 — scaffold.** The command tree, provider interface, config
+> **Status: v0.1.0 - scaffold.** The command tree, provider interface, config
 > handling and local state store exist. No provider is implemented yet, so
 > nothing can be provisioned. See [Roadmap](#roadmap).
 
@@ -16,7 +16,7 @@ One static Go binary. No Terraform, no domain, no CDN.
 **Direct IP, no DNS.** REALITY works by making the server's TLS handshake
 indistinguishable from a real site's. Putting a CDN in front breaks that trick
 and adds a more surveillable hop. A stable hostname would also be a permanent
-correlation point — which is exactly what rotating the IP is meant to avoid.
+correlation point - which is exactly what rotating the IP is meant to avoid.
 
 **SQLite, not Terraform.** The core workflow is destroy-and-replace: `rotate`
 tears a server down and brings up a new one with a fresh IP and a fresh REALITY
@@ -68,7 +68,7 @@ vpncli destroy <id>
 | `~/.config/vpncli/config.yaml` | User config, written by the wizard (`0600`) |
 | `~/.local/share/vpncli/state.db` | Local server state |
 
-Both honour `XDG_CONFIG_HOME` / `XDG_DATA_HOME`.
+Both honor `XDG_CONFIG_HOME` / `XDG_DATA_HOME`.
 
 ## Layout
 
@@ -81,14 +81,14 @@ internal/state/            SQLite state store
 ```
 
 `VPSProvider` is the single seam every cloud goes through. Providers differ in
-ways that must stay behind it — Hetzner's SDK has native async waiters while
-DigitalOcean, Vultr and Linode need manual polling — so each implementation
+ways that must stay behind it - Hetzner's SDK has native async waiters while
+DigitalOcean, Vultr and Linode need manual polling - so each implementation
 normalizes that inside its own `WaitReady`.
 
 ## Development
 
 ```sh
-make check   # vet + lint + race tests — what CI runs
+make check   # vet + lint + race tests - what CI runs
 make test    # race tests only
 make lint    # golangci-lint (v2.12.2, pinned to match CI)
 make fmt
@@ -97,7 +97,7 @@ make dist    # cross-compiled release archives into dist/
 
 CI runs on every push: tests on Linux and macOS, lint, a `go mod tidy` check,
 and a cgo-free cross-compile of all four release targets. That last job is
-what protects the static-binary promise — if a cgo dependency ever displaces
+what protects the static-binary promise - if a cgo dependency ever displaces
 the pure-Go SQLite driver, it fails there rather than at release time.
 
 Releases are cut by pushing a `v*` tag. `make dist` runs the identical build

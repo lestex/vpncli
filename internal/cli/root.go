@@ -14,7 +14,7 @@ func NewRootCommand() *cobra.Command {
 		Long: `vpncli provisions single-user VPN servers on cloud VPS providers and
 configures them with VLESS+REALITY (Xray-core).
 
-Servers are connected to directly by IP — no domain and no CDN — which is what
+Servers are connected to directly by IP - no domain and no CDN - which is what
 lets a server be destroyed and replaced with a fresh IP and fresh keys at any
 time.`,
 		SilenceUsage:  true, // usage on a runtime error is just noise

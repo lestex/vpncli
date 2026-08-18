@@ -84,7 +84,7 @@ type Image struct {
 }
 
 // VPSProvider is the full contract. Each provider normalizes its own SDK's
-// quirks behind these methods — notably WaitReady, where Hetzner has native
+// quirks behind these methods - notably WaitReady, where Hetzner has native
 // async waiters while DigitalOcean, Vultr and Linode need manual polling. That
 // difference must never leak into this interface.
 type VPSProvider interface {

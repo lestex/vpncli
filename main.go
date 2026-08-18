@@ -19,7 +19,7 @@ func main() {
 
 	if err := cli.NewRootCommand().ExecuteContext(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Fprintln(os.Stderr, "vpncli: cancelled")
+			fmt.Fprintln(os.Stderr, "vpncli: canceled")
 			os.Exit(130)
 		}
 		fmt.Fprintf(os.Stderr, "vpncli: %v\n", err)

@@ -3,6 +3,8 @@ package digitalocean
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,32 @@ import (
 
 	"github.com/lestex/vpncli/internal/provider"
 )
+
+// reply is one scripted answer from the fake. Tests queue several to spell out
+// a sequence like "429, then success".
+type reply struct {
+	droplet *godo.Droplet
+	resp    *godo.Response
+	err     error
+}
+
+// ok is a successful reply carrying d.
+func ok(d *godo.Droplet) reply {
+	return reply{droplet: d, resp: &godo.Response{Response: &http.Response{StatusCode: http.StatusOK}}}
+}
+
+// failure is the response and error pair godo hands back for an API error.
+// retryAfter is written into the header when non-empty.
+func failure(code int, retryAfter string) reply {
+	httpResp := &http.Response{StatusCode: code, Header: http.Header{}}
+	if retryAfter != "" {
+		httpResp.Header.Set("Retry-After", retryAfter)
+	}
+	return reply{
+		resp: &godo.Response{Response: httpResp},
+		err:  &godo.ErrorResponse{Response: httpResp, Message: http.StatusText(code)},
+	}
+}
 
 // fakeDroplets stands in for godo.DropletsService. The interface is embedded
 // rather than stubbed, so an unexpected call panics instead of returning a
@@ -23,6 +51,69 @@ type fakeDroplets struct {
 	// requestedPages records the Page of every call.
 	requestedPages []int
 	perPage        int
+
+	// Scripted replies, consumed in order by the matching method.
+	gets    []reply
+	creates []reply
+	deletes []reply
+
+	// What each method was actually asked for.
+	getIDs     []int
+	createReqs []*godo.DropletCreateRequest
+	deleteIDs  []int
+
+	// slept records what every backoff and poll would have cost, without
+	// spending it. sleepErr stands in for a context that ended mid-wait.
+	slept    []time.Duration
+	sleepErr error
+
+	// sshRefusals is how many SSH probes are refused before one connects,
+	// which is how a droplet behaves between "active" and a listening sshd.
+	sshRefusals int
+	sshDials    int
+}
+
+// next pops the script's next reply. Running out is a bug in the test, not
+// something to paper over with a zero value.
+func (f *fakeDroplets) next(script *[]reply) reply {
+	if len(*script) == 0 {
+		panic("fakeDroplets: unscripted call")
+	}
+
+	r := (*script)[0]
+	*script = (*script)[1:]
+	return r
+}
+
+func (f *fakeDroplets) Get(_ context.Context, id int) (*godo.Droplet, *godo.Response, error) {
+	f.getIDs = append(f.getIDs, id)
+	r := f.next(&f.gets)
+	return r.droplet, r.resp, r.err
+}
+
+func (f *fakeDroplets) Create(_ context.Context, req *godo.DropletCreateRequest) (*godo.Droplet, *godo.Response, error) {
+	f.createReqs = append(f.createReqs, req)
+	r := f.next(&f.creates)
+	return r.droplet, r.resp, r.err
+}
+
+func (f *fakeDroplets) Delete(_ context.Context, id int) (*godo.Response, error) {
+	f.deleteIDs = append(f.deleteIDs, id)
+	r := f.next(&f.deletes)
+	return r.resp, r.err
+}
+
+func (f *fakeDroplets) sleep(_ context.Context, d time.Duration) error {
+	f.slept = append(f.slept, d)
+	return f.sleepErr
+}
+
+func (f *fakeDroplets) dial(context.Context, string) error {
+	f.sshDials++
+	if f.sshDials <= f.sshRefusals {
+		return errors.New("connection refused")
+	}
+	return nil
 }
 
 func (f *fakeDroplets) List(_ context.Context, opt *godo.ListOptions) ([]godo.Droplet, *godo.Response, error) {
@@ -47,8 +138,13 @@ func (f *fakeDroplets) List(_ context.Context, opt *godo.ListOptions) ([]godo.Dr
 	return f.pages[idx], &godo.Response{Links: links}, nil
 }
 
+// newTestProvider wires a provider to the fake, with waiting and dialing
+// stubbed: a test must spend no real time and open no real sockets.
 func newTestProvider(f *fakeDroplets) *Provider {
-	return &Provider{droplets: f}
+	p := newProvider(f)
+	p.sleep = f.sleep
+	p.dialSSH = f.dial
+	return p
 }
 
 func droplet(id int, name, status string) godo.Droplet {
@@ -335,10 +431,6 @@ func TestUnimplementedMethodsReportSo(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"GetInstance", func() error { _, err := p.GetInstance(ctx, "1"); return err }},
-		{"CreateInstance", func() error { _, err := p.CreateInstance(ctx, provider.CreateOptions{}); return err }},
-		{"DeleteInstance", func() error { return p.DeleteInstance(ctx, "1") }},
-		{"WaitReady", func() error { _, err := p.WaitReady(ctx, "1"); return err }},
 		{"ListRegions", func() error { _, err := p.ListRegions(ctx); return err }},
 		{"ListSizes", func() error { _, err := p.ListSizes(ctx); return err }},
 		{"ListImages", func() error { _, err := p.ListImages(ctx); return err }},
@@ -349,5 +441,304 @@ func TestUnimplementedMethodsReportSo(t *testing.T) {
 				t.Errorf("got %v, want ErrNotImplemented", err)
 			}
 		})
+	}
+}
+
+func TestGetInstance(t *testing.T) {
+	d := droplet(1001, "vpncli-fra1-a1b2", "active")
+	f := &fakeDroplets{gets: []reply{ok(&d)}}
+
+	got, err := newTestProvider(f).GetInstance(context.Background(), "1001")
+	if err != nil {
+		t.Fatalf("GetInstance: %v", err)
+	}
+	if got.ID != "1001" || got.IPv4 != "203.0.113.10" {
+		t.Errorf("got %+v, want droplet 1001 at 203.0.113.10", got)
+	}
+	if len(f.getIDs) != 1 || f.getIDs[0] != 1001 {
+		t.Errorf("asked for %v, want [1001]", f.getIDs)
+	}
+}
+
+func TestGetInstanceNotFound(t *testing.T) {
+	f := &fakeDroplets{gets: []reply{failure(http.StatusNotFound, "")}}
+
+	_, err := newTestProvider(f).GetInstance(context.Background(), "1001")
+	if !errors.Is(err, provider.ErrNotFound) {
+		t.Errorf("got %v, want provider.ErrNotFound", err)
+	}
+}
+
+// A 200 carrying no droplet must not read as a server with no address.
+func TestGetInstanceEmptyBody(t *testing.T) {
+	f := &fakeDroplets{gets: []reply{ok(nil)}}
+
+	if _, err := newTestProvider(f).GetInstance(context.Background(), "1001"); !errors.Is(err, provider.ErrNotFound) {
+		t.Errorf("got %v, want provider.ErrNotFound", err)
+	}
+}
+
+// An ID that was never a droplet ID cannot name a live droplet, so `sync` gets
+// the same answer it would for a deleted one - and no request goes out.
+func TestGetInstanceRejectsMalformedIDs(t *testing.T) {
+	for _, id := range []string{"", "abc", "0", "-3", "10.5", " 1001"} {
+		t.Run(id, func(t *testing.T) {
+			f := &fakeDroplets{}
+			if _, err := newTestProvider(f).GetInstance(context.Background(), id); !errors.Is(err, provider.ErrNotFound) {
+				t.Errorf("GetInstance(%q) = %v, want provider.ErrNotFound", id, err)
+			}
+			if len(f.getIDs) != 0 {
+				t.Errorf("%q reached the API as %v", id, f.getIDs)
+			}
+		})
+	}
+}
+
+func TestCreateInstance(t *testing.T) {
+	d := droplet(1001, "vpncli-fra1-a1b2", "new")
+	f := &fakeDroplets{creates: []reply{ok(&d)}}
+
+	got, err := newTestProvider(f).CreateInstance(context.Background(), provider.CreateOptions{
+		Name:      "vpncli-fra1-a1b2",
+		Region:    "fra1",
+		Size:      "s-1vcpu-1gb",
+		Image:     "ubuntu-24-04-x64",
+		SSHKeyIDs: []string{"aa:bb:cc"},
+		Tags:      []string{"vpncli"},
+	})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	if got.ID != "1001" || got.Status != provider.StatusProvisioning {
+		t.Errorf("got %+v, want droplet 1001 provisioning", got)
+	}
+
+	if len(f.createReqs) != 1 {
+		t.Fatalf("made %d create calls, want 1", len(f.createReqs))
+	}
+	req := f.createReqs[0]
+	if req.Name != "vpncli-fra1-a1b2" || req.Region != "fra1" || req.Size != "s-1vcpu-1gb" {
+		t.Errorf("request = %+v, want the options passed through", req)
+	}
+	if req.Image.Slug != "ubuntu-24-04-x64" || req.Image.ID != 0 {
+		t.Errorf("Image = %+v, want the slug", req.Image)
+	}
+	if len(req.SSHKeys) != 1 || req.SSHKeys[0].Fingerprint != "aa:bb:cc" {
+		t.Errorf("SSHKeys = %+v, want one fingerprint", req.SSHKeys)
+	}
+	if len(req.Tags) != 1 || req.Tags[0] != "vpncli" {
+		t.Errorf("Tags = %v, want [vpncli]", req.Tags)
+	}
+	if req.WithDropletAgent == nil || *req.WithDropletAgent {
+		t.Error("the metrics agent should be turned off explicitly")
+	}
+	if req.Backups || req.IPv6 {
+		t.Errorf("unrequested extras enabled: backups=%v ipv6=%v", req.Backups, req.IPv6)
+	}
+}
+
+// Numeric values name DigitalOcean's own IDs; anything else is a slug or a
+// fingerprint.
+func TestCreateInstanceNumericImageAndKey(t *testing.T) {
+	d := droplet(1001, "vpncli-fra1-a1b2", "new")
+	f := &fakeDroplets{creates: []reply{ok(&d)}}
+
+	_, err := newTestProvider(f).CreateInstance(context.Background(), provider.CreateOptions{
+		Name:      "vpncli-fra1-a1b2",
+		Region:    "fra1",
+		Size:      "s-1vcpu-1gb",
+		Image:     "1234567",
+		SSHKeyIDs: []string{"7654321"},
+	})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+
+	req := f.createReqs[0]
+	if req.Image.ID != 1234567 || req.Image.Slug != "" {
+		t.Errorf("Image = %+v, want ID 1234567", req.Image)
+	}
+	if req.SSHKeys[0].ID != 7654321 || req.SSHKeys[0].Fingerprint != "" {
+		t.Errorf("SSHKeys[0] = %+v, want ID 7654321", req.SSHKeys[0])
+	}
+}
+
+func TestCreateInstanceValidatesOptions(t *testing.T) {
+	complete := provider.CreateOptions{
+		Name:      "vpncli-fra1-a1b2",
+		Region:    "fra1",
+		Size:      "s-1vcpu-1gb",
+		Image:     "ubuntu-24-04-x64",
+		SSHKeyIDs: []string{"aa:bb:cc"},
+	}
+
+	tests := []struct {
+		name  string
+		strip func(*provider.CreateOptions)
+		want  string
+	}{
+		{"no name", func(o *provider.CreateOptions) { o.Name = "" }, "name"},
+		{"no region", func(o *provider.CreateOptions) { o.Region = "" }, "region"},
+		{"no size", func(o *provider.CreateOptions) { o.Size = "" }, "size"},
+		{"no image", func(o *provider.CreateOptions) { o.Image = "" }, "image"},
+		{"no ssh key", func(o *provider.CreateOptions) { o.SSHKeyIDs = nil }, "ssh key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := complete
+			tt.strip(&opts)
+
+			f := &fakeDroplets{}
+			_, err := newTestProvider(f).CreateInstance(context.Background(), opts)
+			if !errors.Is(err, ErrInvalidOptions) {
+				t.Fatalf("got %v, want ErrInvalidOptions", err)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q does not name the missing %q", err, tt.want)
+			}
+			if len(f.createReqs) != 0 {
+				t.Error("an incomplete request still reached the API")
+			}
+		})
+	}
+}
+
+// A 429 was rejected before it reached anything, so the create can be repeated.
+func TestCreateInstanceRetriesRateLimit(t *testing.T) {
+	d := droplet(1001, "vpncli-fra1-a1b2", "new")
+	f := &fakeDroplets{creates: []reply{failure(http.StatusTooManyRequests, ""), ok(&d)}}
+
+	_, err := newTestProvider(f).CreateInstance(context.Background(), validOptions())
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	if len(f.createReqs) != 2 {
+		t.Errorf("made %d attempts, want 2", len(f.createReqs))
+	}
+}
+
+// A 500 may mean the droplet exists and only the reply was lost. Retrying
+// would strand a second one, billed and untracked.
+func TestCreateInstanceDoesNotRetryServerErrors(t *testing.T) {
+	f := &fakeDroplets{creates: []reply{failure(http.StatusInternalServerError, "")}}
+
+	if _, err := newTestProvider(f).CreateInstance(context.Background(), validOptions()); err == nil {
+		t.Fatal("expected an error")
+	}
+	if len(f.createReqs) != 1 {
+		t.Errorf("made %d attempts, want 1", len(f.createReqs))
+	}
+}
+
+func validOptions() provider.CreateOptions {
+	return provider.CreateOptions{
+		Name:      "vpncli-fra1-a1b2",
+		Region:    "fra1",
+		Size:      "s-1vcpu-1gb",
+		Image:     "ubuntu-24-04-x64",
+		SSHKeyIDs: []string{"aa:bb:cc"},
+	}
+}
+
+func TestDeleteInstance(t *testing.T) {
+	f := &fakeDroplets{deletes: []reply{{resp: &godo.Response{Response: &http.Response{StatusCode: http.StatusNoContent}}}}}
+
+	if err := newTestProvider(f).DeleteInstance(context.Background(), "1001"); err != nil {
+		t.Fatalf("DeleteInstance: %v", err)
+	}
+	if len(f.deleteIDs) != 1 || f.deleteIDs[0] != 1001 {
+		t.Errorf("deleted %v, want [1001]", f.deleteIDs)
+	}
+}
+
+func TestDeleteInstanceNotFound(t *testing.T) {
+	f := &fakeDroplets{deletes: []reply{failure(http.StatusNotFound, "")}}
+
+	if err := newTestProvider(f).DeleteInstance(context.Background(), "1001"); !errors.Is(err, provider.ErrNotFound) {
+		t.Errorf("got %v, want provider.ErrNotFound", err)
+	}
+}
+
+func TestDeleteInstanceRejectsMalformedIDs(t *testing.T) {
+	f := &fakeDroplets{}
+	if err := newTestProvider(f).DeleteInstance(context.Background(), "not-an-id"); !errors.Is(err, provider.ErrNotFound) {
+		t.Errorf("got %v, want provider.ErrNotFound", err)
+	}
+	if len(f.deleteIDs) != 0 {
+		t.Errorf("a malformed ID reached the API as %v", f.deleteIDs)
+	}
+}
+
+// The full boot sequence: building, then active but addressless, then
+// addressed but with sshd not up yet, then usable.
+func TestWaitReady(t *testing.T) {
+	building := droplet(1001, "vpncli-fra1-a1b2", "new")
+	building.Networks = nil
+
+	addressless := droplet(1001, "vpncli-fra1-a1b2", "active")
+	addressless.Networks = nil
+
+	ready := droplet(1001, "vpncli-fra1-a1b2", "active")
+
+	f := &fakeDroplets{
+		gets:        []reply{ok(&building), ok(&addressless), ok(&ready), ok(&ready)},
+		sshRefusals: 1,
+	}
+
+	got, err := newTestProvider(f).WaitReady(context.Background(), "1001")
+	if err != nil {
+		t.Fatalf("WaitReady: %v", err)
+	}
+	if got.IPv4 != "203.0.113.10" || got.Status != provider.StatusActive {
+		t.Errorf("got %+v, want an active droplet with an address", got)
+	}
+	if len(f.getIDs) != 4 {
+		t.Errorf("polled %d times, want 4", len(f.getIDs))
+	}
+	if f.sshDials != 2 {
+		t.Errorf("dialed %d times, want 2 - the addressless poll must not dial", f.sshDials)
+	}
+	if len(f.slept) != 3 {
+		t.Errorf("slept %d times, want one per unready poll", len(f.slept))
+	}
+	for _, d := range f.slept {
+		if d != defaultPollInterval {
+			t.Errorf("slept %v between polls, want %v", d, defaultPollInterval)
+		}
+	}
+}
+
+// A droplet on its way out is not something more polling will fix.
+func TestWaitReadyFailsOnTerminalState(t *testing.T) {
+	d := droplet(1001, "vpncli-fra1-a1b2", "archive")
+	f := &fakeDroplets{gets: []reply{ok(&d)}}
+
+	if _, err := newTestProvider(f).WaitReady(context.Background(), "1001"); err == nil {
+		t.Fatal("a droplet being torn down should not read as ready")
+	}
+	if f.sshDials != 0 {
+		t.Error("a doomed droplet should not be dialed")
+	}
+}
+
+func TestWaitReadyStopsWhenContextEnds(t *testing.T) {
+	building := droplet(1001, "vpncli-fra1-a1b2", "new")
+	f := &fakeDroplets{
+		gets:     []reply{ok(&building)},
+		sleepErr: context.DeadlineExceeded,
+	}
+
+	_, err := newTestProvider(f).WaitReady(context.Background(), "1001")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("got %v, want context.DeadlineExceeded", err)
+	}
+}
+
+func TestWaitReadyPropagatesNotFound(t *testing.T) {
+	f := &fakeDroplets{gets: []reply{failure(http.StatusNotFound, "")}}
+
+	if _, err := newTestProvider(f).WaitReady(context.Background(), "1001"); !errors.Is(err, provider.ErrNotFound) {
+		t.Errorf("got %v, want provider.ErrNotFound", err)
 	}
 }

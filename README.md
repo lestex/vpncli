@@ -7,10 +7,11 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v0.2.0 - read-only DigitalOcean.** The command tree, provider
-> interface, config handling and local state store exist, and
-> `vpncli providers do list` talks to a real DigitalOcean account. Nothing can
-> be provisioned yet. See [Roadmap](#roadmap).
+> **Status: v0.3.0 - DigitalOcean create and destroy.** The provider can now
+> create, inspect, wait on and destroy droplets, with retries around rate
+> limits. No command drives it yet: `vpncli providers do list` is still the
+> only thing that reaches the API, and the state store is not wired in until
+> v0.4.0. See [Roadmap](#roadmap).
 
 ## Why it is built this way
 
@@ -125,8 +126,8 @@ locally, so packaging can be rehearsed before the tag goes out.
 | Version | Scope |
 | --- | --- |
 | v0.1.0 | ✅ Scaffold: CLI, provider interface, config, SQLite schema |
-| **v0.2.0** | ✅ DigitalOcean read-only: `ListInstances`, `providers do list` |
-| v0.3.0 | DigitalOcean create/delete, `WaitReady`, 429 backoff |
+| v0.2.0 | ✅ DigitalOcean read-only: `ListInstances`, `providers do list` |
+| **v0.3.0** | ✅ DigitalOcean create/delete, `WaitReady`, 429 backoff |
 | v0.4.0 | State wired into create/delete; `list` and `sync` |
 | v0.5.0 | Wizard: provider + region select |
 | v0.6.0 | Wizard: size + OS select |

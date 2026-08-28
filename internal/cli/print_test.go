@@ -2,11 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lestex/vpncli/internal/provider"
+	"github.com/lestex/vpncli/internal/state"
 )
 
 func TestPrintInstancesEmpty(t *testing.T) {
@@ -92,5 +94,67 @@ func TestOrDash(t *testing.T) {
 	}
 	if got := orDash("fra1"); got != "fra1" {
 		t.Errorf("orDash(\"fra1\") = %q, want it unchanged", got)
+	}
+}
+
+func TestPrintServers(t *testing.T) {
+	var buf bytes.Buffer
+	err := printServers(&buf, []state.Server{
+		{
+			ID:         7,
+			ProviderID: "1001",
+			Name:       "vpncli-fra1-a1b2",
+			Region:     "fra1",
+			Size:       "s-1vcpu-1gb",
+			Image:      "ubuntu-24-04-x64",
+			IPv4:       "203.0.113.10",
+			Status:     "active",
+			CreatedAt:  time.Now().Add(-3 * time.Hour),
+		},
+	})
+	if err != nil {
+		t.Fatalf("printServers: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want a header plus one row:\n%s", len(lines), buf.String())
+	}
+	// The local id is what other commands take, so it leads the row.
+	if !strings.HasPrefix(lines[1], "7") {
+		t.Errorf("row does not lead with the local id: %q", lines[1])
+	}
+	if strings.Contains(lines[1], "1001") {
+		t.Errorf("row shows the provider id: %q", lines[1])
+	}
+}
+
+// A listing from state and one from the API must have the same columns, or
+// they read as different tables.
+func TestListingsShareAHeader(t *testing.T) {
+	var fromAPI, fromState bytes.Buffer
+	if err := printInstances(&fromAPI, []provider.VPSInstance{{ID: "1001"}}); err != nil {
+		t.Fatalf("printInstances: %v", err)
+	}
+	if err := printServers(&fromState, []state.Server{{ID: 7}}); err != nil {
+		t.Fatalf("printServers: %v", err)
+	}
+
+	// Compare the column names, not the raw lines: tabwriter pads to the width
+	// of the content, so a wider id shifts everything after it.
+	apiHeader := strings.Fields(strings.Split(fromAPI.String(), "\n")[0])
+	stateHeader := strings.Fields(strings.Split(fromState.String(), "\n")[0])
+	if !slices.Equal(apiHeader, stateHeader) {
+		t.Errorf("headers differ:\napi   %v\nstate %v", apiHeader, stateHeader)
+	}
+}
+
+func TestPrintServersEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	if err := printServers(&buf, nil); err != nil {
+		t.Fatalf("printServers: %v", err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != "no servers found" {
+		t.Errorf("got %q, want the empty message", got)
 	}
 }

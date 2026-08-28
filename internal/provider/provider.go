@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -25,6 +26,11 @@ const (
 	StatusError        Status = "error"
 )
 
+// ManagedTag is applied provider-side to everything vpncli creates. Listings
+// are account-wide, so this is what separates our servers from whatever else
+// lives in the account - and it is the only thing `vpncli sync` will adopt.
+const ManagedTag = "vpncli"
+
 // VPSInstance is a server as the provider currently sees it. This is the live
 // view; the persisted view lives in internal/state.
 type VPSInstance struct {
@@ -39,6 +45,14 @@ type VPSInstance struct {
 	IPv4      string
 	Status    Status
 	CreatedAt time.Time
+
+	// Tags are the provider-side tags. Sync reads ManagedTag out of these.
+	Tags []string
+}
+
+// Managed reports whether this instance carries ManagedTag.
+func (i VPSInstance) Managed() bool {
+	return slices.Contains(i.Tags, ManagedTag)
 }
 
 // CreateOptions is the provider-independent request to stand up one server.

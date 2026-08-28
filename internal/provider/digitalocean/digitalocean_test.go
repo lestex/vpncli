@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +157,7 @@ func droplet(id int, name, status string) godo.Droplet {
 		Region:   &godo.Region{Slug: "fra1"},
 		Image:    &godo.Image{Slug: "ubuntu-24-04-x64"},
 		Created:  "2026-08-17T10:30:00Z",
+		Tags:     []string{provider.ManagedTag},
 		Networks: &godo.Networks{
 			V4: []godo.NetworkV4{
 				{Type: "private", IPAddress: "10.0.0.2"},
@@ -195,9 +197,13 @@ func TestListInstances(t *testing.T) {
 		IPv4:      "203.0.113.10",
 		Status:    provider.StatusActive,
 		CreatedAt: time.Date(2026, 8, 17, 10, 30, 0, 0, time.UTC),
+		Tags:      []string{provider.ManagedTag},
 	}
-	if got[0] != want {
+	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("conversion mismatch:\ngot  %+v\nwant %+v", got[0], want)
+	}
+	if !got[0].Managed() {
+		t.Error("a tagged droplet should read as managed")
 	}
 }
 

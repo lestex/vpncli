@@ -3,16 +3,69 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"text/tabwriter"
 	"time"
 
 	"github.com/lestex/vpncli/internal/provider"
+	"github.com/lestex/vpncli/internal/state"
 )
 
-// printInstances writes instances as an aligned table. Shared so listings
-// from the API and from local state stay visually identical.
+// row is one line of a server listing, whatever it was read from. Going
+// through it is what keeps a listing from the API and one from local state
+// looking the same - the only difference is which id the first column shows.
+type row struct {
+	id        string
+	name      string
+	region    string
+	size      string
+	image     string
+	ipv4      string
+	status    string
+	createdAt time.Time
+}
+
+// printInstances writes the live view from a provider API. The id column is
+// the provider's own.
 func printInstances(w io.Writer, instances []provider.VPSInstance) error {
-	if len(instances) == 0 {
+	rows := make([]row, 0, len(instances))
+	for _, inst := range instances {
+		rows = append(rows, row{
+			id:        inst.ID,
+			name:      inst.Name,
+			region:    inst.Region,
+			size:      inst.Size,
+			image:     inst.Image,
+			ipv4:      inst.IPv4,
+			status:    string(inst.Status),
+			createdAt: inst.CreatedAt,
+		})
+	}
+	return printRows(w, rows)
+}
+
+// printServers writes the persisted view. The id column is the short local one
+// the user types.
+func printServers(w io.Writer, servers []state.Server) error {
+	rows := make([]row, 0, len(servers))
+	for _, srv := range servers {
+		rows = append(rows, row{
+			id:        strconv.FormatInt(srv.ID, 10),
+			name:      srv.Name,
+			region:    srv.Region,
+			size:      srv.Size,
+			image:     srv.Image,
+			ipv4:      srv.IPv4,
+			status:    srv.Status,
+			createdAt: srv.CreatedAt,
+		})
+	}
+	return printRows(w, rows)
+}
+
+// printRows writes rows as an aligned table.
+func printRows(w io.Writer, rows []row) error {
+	if len(rows) == 0 {
 		_, err := fmt.Fprintln(w, "no servers found")
 		return err
 	}
@@ -20,16 +73,16 @@ func printInstances(w io.Writer, instances []provider.VPSInstance) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tNAME\tREGION\tSIZE\tIMAGE\tIPV4\tSTATUS\tAGE")
 
-	for _, inst := range instances {
+	for _, r := range rows {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			inst.ID,
-			orDash(inst.Name),
-			orDash(inst.Region),
-			orDash(inst.Size),
-			orDash(inst.Image),
-			orDash(inst.IPv4),
-			inst.Status,
-			age(inst.CreatedAt),
+			r.id,
+			orDash(r.name),
+			orDash(r.region),
+			orDash(r.size),
+			orDash(r.image),
+			orDash(r.ipv4),
+			orDash(r.status),
+			age(r.createdAt),
 		)
 	}
 

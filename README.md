@@ -7,11 +7,11 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v0.3.0 - DigitalOcean create and destroy.** The provider can now
-> create, inspect, wait on and destroy droplets, with retries around rate
-> limits. No command drives it yet: `vpncli providers do list` is still the
-> only thing that reaches the API, and the state store is not wired in until
-> v0.4.0. See [Roadmap](#roadmap).
+> **Status: v0.4.0 - state wired in.** `vpncli list` and `vpncli sync` work
+> against the local store, and creating and destroying servers now records
+> what it did. There is still no `provision` command to drive it: choosing a
+> region, size and image is the wizard's job, and that starts at v0.5.0. See
+> [Roadmap](#roadmap).
 
 ## Why it is built this way
 
@@ -65,13 +65,35 @@ ID    NAME              REGION  SIZE                IMAGE             IPV4      
 This is not filtered to servers vpncli created, which is what makes it useful
 for confirming a token works and for spotting drift.
 
+List the servers vpncli itself tracks, from local state:
+
+```sh
+vpncli list
+```
+
+No API call, so it is instant, works offline, and needs no token. The `ID`
+column is the short local id that other commands take. The trade is staleness:
+a server created or destroyed elsewhere shows up only after a sync.
+
+```sh
+vpncli sync
+```
+
+```
+1 adopted, 2 updated, 1 removed
+```
+
+`sync` treats the provider as the source of truth. Rows for servers that no
+longer exist are dropped, drifted addresses and statuses are corrected, and
+servers tagged `vpncli` that local state has never seen are adopted - which is
+how a second machine, or a run that died mid-provision, is picked back up.
+Untagged servers are left alone, because that listing covers the whole account.
+
 Provisioning commands land in later versions; the full workflow will be:
 
 ```sh
 vpncli init              # interactive wizard, writes config.yaml
 vpncli provision         # create + bootstrap a server
-vpncli list              # servers from local state (fast)
-vpncli sync              # reconcile local state against the provider API
 vpncli connect <id>      # bring up the local sing-box client
 vpncli connect <id> --qr # terminal QR for mobile clients
 vpncli rotate <id>       # destroy and replace: new IP, new keys
@@ -92,11 +114,18 @@ Both honor `XDG_CONFIG_HOME` / `XDG_DATA_HOME`.
 ```
 cmd/vpncli/                      entry point, signal handling
 internal/cli/                    cobra command tree
+internal/manager/                provider + state, joined
 internal/provider/               VPSProvider interface and shared types
 internal/provider/digitalocean/  DigitalOcean implementation
 internal/config/                 config file + XDG paths
 internal/state/                  SQLite state store
 ```
+
+`manager` is where the two halves meet, and it holds one rule: the provider is
+the source of truth and state follows it, never the other way round. That is
+what makes `sync` a reconciliation rather than a merge, and why `Provision`
+records a server before it waits on it - an untracked server is one that keeps
+billing where nobody can see it.
 
 `VPSProvider` is the single seam every cloud goes through. Providers differ in
 ways that must stay behind it - Hetzner's SDK has native async waiters while
@@ -127,8 +156,8 @@ locally, so packaging can be rehearsed before the tag goes out.
 | --- | --- |
 | v0.1.0 | ✅ Scaffold: CLI, provider interface, config, SQLite schema |
 | v0.2.0 | ✅ DigitalOcean read-only: `ListInstances`, `providers do list` |
-| **v0.3.0** | ✅ DigitalOcean create/delete, `WaitReady`, 429 backoff |
-| v0.4.0 | State wired into create/delete; `list` and `sync` |
+| v0.3.0 | ✅ DigitalOcean create/delete, `WaitReady`, 429 backoff |
+| **v0.4.0** | ✅ State wired into create/delete; `list` and `sync` |
 | v0.5.0 | Wizard: provider + region select |
 | v0.6.0 | Wizard: size + OS select |
 | v0.7.0 | Wizard: REALITY camouflage; `provision` wiring |

@@ -22,7 +22,9 @@ time.`,
 	}
 
 	root.AddCommand(
+		newListCommand(),
 		newProvidersCommand(),
+		newSyncCommand(),
 		newVersionCommand(),
 	)
 

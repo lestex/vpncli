@@ -339,6 +339,7 @@ func toInstance(d godo.Droplet) provider.VPSInstance {
 		Provider: Name,
 		Size:     d.SizeSlug,
 		Status:   toStatus(d.Status),
+		Tags:     d.Tags,
 	}
 
 	if d.Region != nil {

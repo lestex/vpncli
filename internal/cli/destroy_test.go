@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/lestex/vpncli/internal/config"
+	"github.com/lestex/vpncli/internal/prompt"
 	"github.com/lestex/vpncli/internal/provider"
 	"github.com/lestex/vpncli/internal/provider/digitalocean"
 	"github.com/lestex/vpncli/internal/state"
@@ -130,7 +131,7 @@ func TestConfirmDestroy(t *testing.T) {
 
 	for _, tt := range tests {
 		var out bytes.Buffer
-		got, err := confirmDestroy(strings.NewReader(tt.answer), &out, doomedServer())
+		got, err := confirmDestroy(context.Background(), prompt.New(strings.NewReader(tt.answer), &out), doomedServer())
 		if err != nil {
 			t.Fatalf("confirmDestroy(%q): %v", tt.answer, err)
 		}

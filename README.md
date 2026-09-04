@@ -117,8 +117,13 @@ Camouflage [www.microsoft.com]:
 
 An answer is either the number or the slug, and re-running the wizard offers
 the current value as the default, so `vpncli init` doubles as a way to change
-one setting. Nothing is written until the last question is answered - an
-abandoned wizard leaves no half-filled config behind.
+one setting. Nothing is written until the last question is answered - Ctrl-C or
+Ctrl-D gets out of any question, and an abandoned wizard leaves no half-filled
+config behind.
+
+Ctrl-C is a cancel rather than a kill everywhere: a `provision` interrupted
+mid-wait still reports the server it created and the id to destroy it by. A
+second Ctrl-C kills outright.
 
 The menus are filtered on purpose, and each filter is a decision:
 

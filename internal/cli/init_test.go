@@ -524,6 +524,34 @@ func TestInitKeepsExistingSettings(t *testing.T) {
 	}
 }
 
+// Ctrl-C has to end the wizard where it stands. A question is a blocked read
+// on a terminal, so nothing but the context can get out of it.
+func TestInitStopsOnACanceledContext(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(10*time.Millisecond, cancel)
+
+	var out bytes.Buffer
+	// A reader that never returns is a terminal nobody is typing at.
+	err := runInit(ctx, neverReads{}, &out,
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+
+	if cfg := savedConfig(t); !reflect.DeepEqual(cfg, config.Config{}) {
+		t.Errorf("an abandoned wizard wrote %+v", cfg)
+	}
+}
+
+// neverReads is a terminal with nobody at it.
+type neverReads struct{}
+
+func (neverReads) Read([]byte) (int, error) {
+	select {}
+}
+
 // Ctrl-D partway through must leave no half-answered config behind.
 func TestInitAbandonedWritesNothing(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

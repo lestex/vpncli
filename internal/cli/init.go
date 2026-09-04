@@ -61,7 +61,7 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) er
 	p := prompt.New(in, out)
 	p.Printf("Answers are written to %s\n\n", path)
 
-	name, err := selectProvider(p, cfg.Provider)
+	name, err := selectProvider(ctx, p, cfg.Provider)
 	if err != nil {
 		return err
 	}
@@ -105,7 +105,7 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) er
 
 	// Camouflage is the one question with no API behind it, so it is asked
 	// last: everything that can fail on a token has already failed by here.
-	host, err := selectCamouflage(p, cfg.Reality.Host())
+	host, err := selectCamouflage(ctx, p, cfg.Reality.Host())
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) er
 // selectProvider asks which cloud to use. With one implementation there is
 // nothing to ask, and saying which one was picked is enough - this becomes a
 // real question as clouds are added.
-func selectProvider(p *prompt.Prompter, current string) (string, error) {
+func selectProvider(ctx context.Context, p *prompt.Prompter, current string) (string, error) {
 	options := make([]prompt.Option, 0, len(implementations))
 	for _, impl := range implementations {
 		options = append(options, prompt.Option{Key: impl.name, Label: impl.label})
@@ -141,7 +141,7 @@ func selectProvider(p *prompt.Prompter, current string) (string, error) {
 		return options[0].Key, nil
 	}
 
-	i, err := p.Select("Provider", options, current)
+	i, err := p.Select(ctx, "Provider", options, current)
 	if err != nil {
 		return "", err
 	}
@@ -174,7 +174,7 @@ func selectRegion(ctx context.Context, p *prompt.Prompter, vps provider.VPSProvi
 
 	p.Printf("Pick one close to you. Latency is the one cost a VPN cannot make back.\n\n")
 
-	i, err := p.Select("Region", options, current)
+	i, err := p.Select(ctx, "Region", options, current)
 	if err != nil {
 		return "", err
 	}
@@ -223,7 +223,7 @@ func selectSize(ctx context.Context, p *prompt.Prompter, vps provider.VPSProvide
 	p.Printf("A tunnel is network-bound, not CPU-bound. The cheapest size is the\n")
 	p.Printf("right answer far more often than not.\n\n")
 
-	i, err := p.Select("Size", options, defaultOf(current, options))
+	i, err := p.Select(ctx, "Size", options, defaultOf(current, options))
 	if err != nil {
 		return "", err
 	}
@@ -253,7 +253,7 @@ func selectImage(ctx context.Context, p *prompt.Prompter, vps provider.VPSProvid
 		return "", fmt.Errorf("%s offers no %s image", vps.Name(), strings.Join(supportedDistributions, " or "))
 	}
 
-	i, err := p.Select("Image", options, defaultOf(current, options))
+	i, err := p.Select(ctx, "Image", options, defaultOf(current, options))
 	if err != nil {
 		return "", err
 	}
@@ -287,7 +287,7 @@ func selectSSHKeys(ctx context.Context, p *prompt.Prompter, vps provider.VPSProv
 	p.Printf("This is the key the bootstrap logs in with. Pick one whose private\n")
 	p.Printf("half is on this machine.\n\n")
 
-	i, err := p.Select("SSH key", options, defaultOf(configuredKeyName(keys, current), options))
+	i, err := p.Select(ctx, "SSH key", options, defaultOf(configuredKeyName(keys, current), options))
 	if err != nil {
 		return nil, "", err
 	}
@@ -338,7 +338,7 @@ var camouflageSites = []prompt.Option{
 const customCamouflage = "other"
 
 // selectCamouflage asks which site the server should look like.
-func selectCamouflage(p *prompt.Prompter, current string) (string, error) {
+func selectCamouflage(ctx context.Context, p *prompt.Prompter, current string) (string, error) {
 	options := slices.Clone(camouflageSites)
 	// A host already configured stays on the menu even when it is not one of
 	// ours, so re-running the wizard cannot quietly replace a chosen site.
@@ -351,7 +351,7 @@ func selectCamouflage(p *prompt.Prompter, current string) (string, error) {
 	p.Printf("site's, so a probe sees only a visit to it. Best is somewhere near\n")
 	p.Printf("the server that nobody would think twice about.\n\n")
 
-	i, err := p.Select("Camouflage", options, defaultOf(current, options))
+	i, err := p.Select(ctx, "Camouflage", options, defaultOf(current, options))
 	if err != nil {
 		return "", err
 	}
@@ -360,7 +360,7 @@ func selectCamouflage(p *prompt.Prompter, current string) (string, error) {
 	}
 
 	for {
-		answer, err := p.Input("Hostname", current)
+		answer, err := p.Input(ctx, "Hostname", current)
 		if err != nil {
 			return "", err
 		}

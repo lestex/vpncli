@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/lestex/vpncli/internal/config"
 	"github.com/lestex/vpncli/internal/manager"
+	"github.com/lestex/vpncli/internal/prompt"
 	"github.com/lestex/vpncli/internal/state"
 )
 
@@ -66,7 +66,7 @@ func runDestroy(ctx context.Context, in io.Reader, out io.Writer, open openFunc,
 	}
 
 	if !yes {
-		ok, err := confirmDestroy(in, out, srv)
+		ok, err := confirmDestroy(ctx, prompt.New(in, out), srv)
 		if err != nil {
 			return err
 		}
@@ -92,18 +92,18 @@ func runDestroy(ctx context.Context, in io.Reader, out io.Writer, open openFunc,
 // confirmDestroy asks before something irreversible. Anything but an explicit
 // yes is a no, including an input that ended: a script piping nothing into
 // destroy has not agreed to anything.
-func confirmDestroy(in io.Reader, out io.Writer, srv state.Server) (bool, error) {
-	fmt.Fprintf(out, "Destroy %s (%s, %s, id %d)? Its IP and keys are gone for good.\n",
+func confirmDestroy(ctx context.Context, p *prompt.Prompter, srv state.Server) (bool, error) {
+	p.Printf("Destroy %s (%s, %s, id %d)? Its IP and keys are gone for good.\n",
 		srv.Name, orDash(srv.IPv4), srv.Region, srv.ID)
-	fmt.Fprint(out, "Type yes to confirm: ")
+	p.Printf("Type yes to confirm: ")
 
-	line, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, fmt.Errorf("reading answer: %w", err)
+	answer, err := p.ReadLine(ctx)
+	if errors.Is(err, prompt.ErrNoInput) {
+		return false, nil
 	}
 	if err != nil {
-		fmt.Fprintln(out)
+		return false, err
 	}
 
-	return strings.EqualFold(strings.TrimSpace(line), "yes"), nil
+	return strings.EqualFold(answer, "yes"), nil
 }

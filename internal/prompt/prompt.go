@@ -8,6 +8,7 @@ package prompt
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -34,13 +35,78 @@ type Option struct {
 
 // Prompter asks questions over one input/output pair.
 type Prompter struct {
-	in  *bufio.Reader
-	out io.Writer
+	out   io.Writer
+	lines <-chan answer
+	// done is the error that ended the input, remembered so a later question
+	// is refused rather than waiting on a channel nothing will send to again.
+	done error
+}
+
+// answer is one line as it came off the input.
+type answer struct {
+	text string
+	err  error
 }
 
 // New returns a Prompter reading from in and writing to out.
+//
+// Input is read on a goroutine of its own. A read from a terminal blocks until
+// a line arrives, which would mean Ctrl-C going unanswered until the user
+// pressed Enter - so the question waits on the reader and on the context at
+// the same time, and gives up on whichever comes first.
 func New(in io.Reader, out io.Writer) *Prompter {
-	return &Prompter{in: bufio.NewReader(in), out: out}
+	lines := make(chan answer)
+	go readLines(bufio.NewReader(in), lines)
+	return &Prompter{out: out, lines: lines}
+}
+
+// readLines feeds the Prompter until the input ends. The error that ends it is
+// sent along with the last line, so nothing is lost, and then the goroutine
+// stops: on a terminal it parks on the read until the process exits, which is
+// the point at which nobody is asking questions any more.
+func readLines(r *bufio.Reader, lines chan<- answer) {
+	for {
+		text, err := r.ReadString('\n')
+		lines <- answer{text: text, err: err}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// readLine waits for one line, the context, or the end of the input.
+func (p *Prompter) readLine(ctx context.Context) (string, error) {
+	if p.done != nil {
+		return "", p.done
+	}
+
+	select {
+	case <-ctx.Done():
+		// The cursor is sitting on the prompt line, and whatever is printed
+		// next should not land on it.
+		p.Printf("\n")
+		return "", ctx.Err()
+	case line := <-p.lines:
+		if line.err != nil {
+			p.done = line.err
+		}
+		return line.text, line.err
+	}
+}
+
+// ReadLine asks nothing and reads one trimmed answer, for a question that is
+// not a menu. The end of the input is ErrNoInput, as it is everywhere here.
+func (p *Prompter) ReadLine(ctx context.Context) (string, error) {
+	line, err := p.readLine(ctx)
+	text := strings.TrimSpace(line)
+	switch {
+	case errors.Is(err, io.EOF) && text == "":
+		p.Printf("\n")
+		return "", ErrNoInput
+	case err != nil && !errors.Is(err, io.EOF):
+		return "", err
+	}
+	return text, nil
 }
 
 // Select prints the options and returns the index of the one chosen. An answer
@@ -51,7 +117,7 @@ func New(in io.Reader, out io.Writer) *Prompter {
 // otherwise an empty answer re-asks. A key that matches nothing is not an
 // error: that is what a config carrying a region from a different provider
 // looks like, and the question simply has no default.
-func (p *Prompter) Select(question string, options []Option, defaultKey string) (int, error) {
+func (p *Prompter) Select(ctx context.Context, question string, options []Option, defaultKey string) (int, error) {
 	if len(options) == 0 {
 		return 0, fmt.Errorf("%s: nothing to choose from", question)
 	}
@@ -62,7 +128,7 @@ func (p *Prompter) Select(question string, options []Option, defaultKey string) 
 
 	def := indexOf(options, defaultKey)
 	for {
-		answer, err := p.ask(question, def, options)
+		answer, err := p.ask(ctx, question, def, options)
 		if err != nil {
 			return 0, err
 		}
@@ -88,7 +154,7 @@ func (p *Prompter) Select(question string, options []Option, defaultKey string) 
 //
 // Validation is the caller's: what makes an answer good differs per question,
 // and only the caller can say so in words worth printing.
-func (p *Prompter) Input(question, def string) (string, error) {
+func (p *Prompter) Input(ctx context.Context, question, def string) (string, error) {
 	for {
 		if def != "" {
 			p.Printf("%s [%s]: ", question, def)
@@ -96,14 +162,14 @@ func (p *Prompter) Input(question, def string) (string, error) {
 			p.Printf("%s: ", question)
 		}
 
-		line, err := p.in.ReadString('\n')
+		line, err := p.readLine(ctx)
 		answer := strings.TrimSpace(line)
 		switch {
 		case errors.Is(err, io.EOF) && answer == "":
 			p.Printf("\n")
 			return "", ErrNoInput
 		case err != nil && !errors.Is(err, io.EOF):
-			return "", fmt.Errorf("reading answer: %w", err)
+			return "", err
 		}
 
 		if answer != "" {
@@ -117,14 +183,14 @@ func (p *Prompter) Input(question, def string) (string, error) {
 }
 
 // ask writes the prompt line and reads one answer, trimmed.
-func (p *Prompter) ask(question string, def int, options []Option) (string, error) {
+func (p *Prompter) ask(ctx context.Context, question string, def int, options []Option) (string, error) {
 	if def >= 0 {
 		p.Printf("%s [%s]: ", question, options[def].Key)
 	} else {
 		p.Printf("%s: ", question)
 	}
 
-	line, err := p.in.ReadString('\n')
+	line, err := p.readLine(ctx)
 	answer := strings.TrimSpace(line)
 	switch {
 	case errors.Is(err, io.EOF) && answer == "":
@@ -133,7 +199,7 @@ func (p *Prompter) ask(question string, def int, options []Option) (string, erro
 		p.Printf("\n")
 		return "", ErrNoInput
 	case err != nil && !errors.Is(err, io.EOF):
-		return "", fmt.Errorf("reading answer: %w", err)
+		return "", err
 	}
 	return answer, nil
 }

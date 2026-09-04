@@ -464,6 +464,36 @@ func TestDestroyKeepsTheRowWhenTheProviderFails(t *testing.T) {
 	}
 }
 
+// Provider ids collide across providers, so a row from another one must not
+// be turned into a delete against the configured provider.
+func TestDestroyRefusesARowFromAnotherProvider(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeProvider{}
+	m := newTestManager(t, f)
+
+	row := toServer(instance("1001", "203.0.113.10", provider.StatusActive, provider.ManagedTag))
+	row.Provider = "hetzner"
+	seeded, err := m.store.Insert(ctx, row)
+	if err != nil {
+		t.Fatalf("seeding state: %v", err)
+	}
+
+	if _, err := m.Destroy(ctx, seeded.ID); !errors.Is(err, ErrWrongProvider) {
+		t.Fatalf("got %v, want ErrWrongProvider", err)
+	}
+	if len(f.deleted) != 0 {
+		t.Errorf("deleted %v for a row belonging to another provider", f.deleted)
+	}
+
+	rows, err := m.store.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("state holds %+v, want the row kept", rows)
+	}
+}
+
 func TestDestroyUnknownID(t *testing.T) {
 	f := &fakeProvider{}
 	m := newTestManager(t, f)

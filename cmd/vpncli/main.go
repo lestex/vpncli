@@ -41,10 +41,16 @@ func interrupted(parent context.Context) (context.Context, context.CancelFunc) {
 	go func() {
 		select {
 		case <-signals:
+			// Stop before canceling, not after. Canceling is what anything
+			// watching can see, and a second Ctrl-C arriving between the two
+			// would land in a channel nobody reads any more - swallowed by the
+			// handler that was supposed to be gone, leaving a stuck command
+			// that cannot be interrupted at all.
+			signal.Stop(signals)
 			cancel()
 		case <-ctx.Done():
+			signal.Stop(signals)
 		}
-		signal.Stop(signals)
 	}()
 
 	return ctx, func() {

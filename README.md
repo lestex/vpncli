@@ -7,7 +7,7 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v1.0.0 - the whole workflow.** `vpncli provision` creates and
+> **Status: v1.0.0 - the whole workflow.** `vpncli server provision` creates and
 > configures a server, `vpncli connect` builds the client config to reach it
 > with, and `vpncli rotate` replaces it with a fresh one that shares nothing
 > with it. See [Roadmap](#roadmap).
@@ -190,8 +190,16 @@ for confirming a token works and for spotting drift.
 List the servers vpncli itself tracks, from local state:
 
 ```sh
-vpncli list
+vpncli server list
 ```
+
+```
+ID  PROVIDER      NAME                REGION  SIZE         IMAGE             IPV4          STATUS  AGE
+3   digitalocean  vpncli-ams3-0a910d  ams3    s-1vcpu-1gb  ubuntu-24-04-x64  203.0.113.10  active  2h
+```
+
+The provider column is there because the id alone stops being unique the
+moment a second provider is configured: what names a server is the pair.
 
 No API call, so it is instant, works offline, and needs no token. The `ID`
 column is the short local id that other commands take. The trade is staleness:
@@ -214,7 +222,7 @@ Untagged servers are left alone, because that listing covers the whole account.
 Create a server from those answers:
 
 ```sh
-vpncli provision
+vpncli server provision
 ```
 
 ```
@@ -283,7 +291,7 @@ If the bootstrap fails halfway - a dropped connection, an apt mirror having a
 bad day - the server is fine and only the configuring needs another go:
 
 ```sh
-vpncli bootstrap 3
+vpncli server bootstrap 3
 ```
 
 That generates fresh key material and replaces whatever reached the server, so
@@ -403,6 +411,23 @@ old server exactly where it was, and says so. Both are billed for the couple
 of minutes in between. The replacement is built from the current config, so it
 picks up anything `vpncli init` has changed since, and it gets a new local id,
 because it is a different server.
+
+## Commands
+
+```
+vpncli init                 interactive wizard, writes config.yaml
+vpncli server list          what local state knows about
+vpncli server provision     create a server and configure it
+vpncli server bootstrap 3   configure one that is not configured yet
+vpncli connect 3            the link, QR or client config to reach one
+vpncli rotate 3             replace one with a fresh server
+vpncli destroy 3            delete one and forget it
+vpncli sync                 reconcile local state against the provider
+vpncli providers do list    every droplet in the account, from the API
+```
+
+Making servers is grouped under `server`; the rest act on one server you
+already have, or on the whole account.
 
 ## Files
 

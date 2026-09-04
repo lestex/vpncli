@@ -45,7 +45,7 @@ Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return fmt.Errorf("%q is not a server id: `vpncli list` shows them", args[0])
+				return fmt.Errorf("%q is not a server id: `vpncli server list` shows them", args[0])
 			}
 			return runRotate(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(),
 				openProvider, dialSSH, reality.Check, id, yes)
@@ -116,7 +116,7 @@ func runRotate(ctx context.Context, in io.Reader, out io.Writer, open openFunc, 
 		// with; nothing is destroyed.
 		fmt.Fprintf(out, "%s is untouched and still serving.\n", old.Name)
 		if replacement.ID != 0 {
-			fmt.Fprintf(out, "The replacement is id %d: `vpncli bootstrap %d` tries again, `vpncli destroy %d` gives up on it.\n",
+			fmt.Fprintf(out, "The replacement is id %d: `vpncli server bootstrap %d` tries again, `vpncli destroy %d` gives up on it.\n",
 				replacement.ID, replacement.ID, replacement.ID)
 		}
 		return err

@@ -129,14 +129,15 @@ func TestPrintServers(t *testing.T) {
 	}
 }
 
-// A listing from state and one from the API must have the same columns, or
-// they read as different tables.
-func TestListingsShareAHeader(t *testing.T) {
+// A listing from state and one from the API read as the same table, apart from
+// the provider: state can hold servers from several and has to say which, an
+// API listing is all one provider and naming it every line says nothing.
+func TestListingsShareAHeaderApartFromTheProvider(t *testing.T) {
 	var fromAPI, fromState bytes.Buffer
-	if err := printInstances(&fromAPI, []provider.VPSInstance{{ID: "1001"}}); err != nil {
+	if err := printInstances(&fromAPI, []provider.VPSInstance{{ID: "1001", Provider: "digitalocean"}}); err != nil {
 		t.Fatalf("printInstances: %v", err)
 	}
-	if err := printServers(&fromState, []state.Server{{ID: 7}}); err != nil {
+	if err := printServers(&fromState, []state.Server{{ID: 7, Provider: "digitalocean"}}); err != nil {
 		t.Fatalf("printServers: %v", err)
 	}
 
@@ -144,8 +145,41 @@ func TestListingsShareAHeader(t *testing.T) {
 	// of the content, so a wider id shifts everything after it.
 	apiHeader := strings.Fields(strings.Split(fromAPI.String(), "\n")[0])
 	stateHeader := strings.Fields(strings.Split(fromState.String(), "\n")[0])
-	if !slices.Equal(apiHeader, stateHeader) {
-		t.Errorf("headers differ:\napi   %v\nstate %v", apiHeader, stateHeader)
+
+	if slices.Contains(apiHeader, "PROVIDER") {
+		t.Errorf("a listing from one provider names it on every line: %v", apiHeader)
+	}
+	if !slices.Contains(stateHeader, "PROVIDER") {
+		t.Errorf("a listing from state does not say which provider: %v", stateHeader)
+	}
+
+	// Everything else has to line up, or the two read as different tables.
+	if without := slices.DeleteFunc(stateHeader, func(c string) bool { return c == "PROVIDER" }); !slices.Equal(apiHeader, without) {
+		t.Errorf("headers differ beyond the provider:\napi   %v\nstate %v", apiHeader, without)
+	}
+}
+
+// The provider is the second column, next to the id: together they are what
+// names a server, and the id alone stops being unique the moment a second
+// provider is configured.
+func TestServerListingNamesTheProvider(t *testing.T) {
+	var buf bytes.Buffer
+	err := printServers(&buf, []state.Server{
+		{ID: 1, Provider: "digitalocean", Name: "vpncli-fra1-a1b2", IPv4: "203.0.113.10"},
+		{ID: 2, Provider: "hetzner", Name: "vpncli-fsn1-c3d4", IPv4: "203.0.113.20"},
+	})
+	if err != nil {
+		t.Fatalf("printServers: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if header := strings.Fields(lines[0]); len(header) < 2 || header[1] != "PROVIDER" {
+		t.Fatalf("header = %v, want PROVIDER second", header)
+	}
+	for i, want := range []string{"digitalocean", "hetzner"} {
+		if got := strings.Fields(lines[i+1]); len(got) < 2 || got[1] != want {
+			t.Errorf("row %d = %v, want %q in the provider column", i, got, want)
+		}
 	}
 }
 

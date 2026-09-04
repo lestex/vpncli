@@ -40,7 +40,7 @@ func newBootstrapCommand() *cobra.Command {
 		Short: "Configure a server that is not configured yet",
 		Long: `Install and configure VLESS+REALITY on a server that already exists.
 
-` + "`vpncli provision`" + ` does this itself. This command is for the server whose
+` + "`vpncli server provision`" + ` does this itself. This command is for the server whose
 bootstrap failed halfway - a network that dropped, an apt mirror having a bad
 day - where the server is fine and only the configuring needs another go.
 
@@ -55,7 +55,7 @@ inside the server and logged by the provider, so the keys go over SSH instead.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return fmt.Errorf("%q is not a server id: `vpncli list` shows them", args[0])
+				return fmt.Errorf("%q is not a server id: `vpncli server list` shows them", args[0])
 			}
 			return runBootstrapCommand(cmd.Context(), cmd.OutOrStdout(), dialSSH, reality.Check, id)
 		},
@@ -100,7 +100,7 @@ func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, chec
 }
 
 // bootstrapServer connects to a server, configures it, and records what it was
-// given. It is shared by `vpncli provision` and `vpncli bootstrap`.
+// given. It is shared by `vpncli server provision` and `vpncli server bootstrap`.
 //
 // The credentials are written only after the server is actually serving. A run
 // that failed halfway leaves the row unconfigured, which is exactly right: the

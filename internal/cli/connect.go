@@ -56,7 +56,7 @@ bootstrapped, so this works offline and needs no token.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return fmt.Errorf("%q is not a server id: `vpncli list` shows them", args[0])
+				return fmt.Errorf("%q is not a server id: `vpncli server list` shows them", args[0])
 			}
 			if asQR && (asSingBox || asTun) {
 				return fmt.Errorf("--qr and --sing-box are two different things to print: pick one")

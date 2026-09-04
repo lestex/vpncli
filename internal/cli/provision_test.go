@@ -27,14 +27,14 @@ func fullConfig() config.Config {
 }
 
 func TestProvisionIsRegistered(t *testing.T) {
-	out := run(t, "--help")
+	out := run(t, "server", "--help")
 	if !strings.Contains(out, "provision") {
-		t.Errorf("provision is missing from root help:\n%s", out)
+		t.Errorf("provision is missing from `vpncli server` help:\n%s", out)
 	}
 }
 
 func TestProvisionRejectsArgs(t *testing.T) {
-	if _, err := execute("provision", "unexpected"); err == nil {
+	if _, err := execute("server", "provision", "unexpected"); err == nil {
 		t.Error("expected an error for an unexpected positional argument")
 	}
 }
@@ -45,7 +45,7 @@ func TestProvisionWithNoConfig(t *testing.T) {
 	withStateDir(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	_, err := execute("provision")
+	_, err := execute("server", "provision")
 	if err == nil {
 		t.Fatal("expected an error for an empty config")
 	}
@@ -68,7 +68,7 @@ func TestProvisionRequiresToken(t *testing.T) {
 		t.Fatalf("seeding config: %v", err)
 	}
 
-	if _, err := execute("provision"); !errors.Is(err, digitalocean.ErrNoToken) {
+	if _, err := execute("server", "provision"); !errors.Is(err, digitalocean.ErrNoToken) {
 		t.Fatalf("got %v, want ErrNoToken", err)
 	}
 }
@@ -127,7 +127,7 @@ func TestServerName(t *testing.T) {
 }
 
 func TestProvisionHelpSaysWhatItDoesNotDoYet(t *testing.T) {
-	out := run(t, "provision", "--help")
+	out := run(t, "server", "provision", "--help")
 	for _, want := range []string{"vpncli init", "vpncli destroy", "Xray-core"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("provision help does not mention %q:\n%s", want, out)
@@ -272,7 +272,7 @@ func TestProvisionPointsAtBootstrapWhenConfiguringFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the bootstrap failure to come back")
 	}
-	if !strings.Contains(out, "vpncli bootstrap") {
+	if !strings.Contains(out, "vpncli server bootstrap") {
 		t.Errorf("nothing says how to finish the server:\n%s", out)
 	}
 

@@ -85,12 +85,12 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc, dial dialFu
 
 	// The server exists; now it has to be made into something worth having.
 	// Its row is already written, so a bootstrap that fails leaves a server
-	// `vpncli bootstrap` can finish rather than one to throw away.
+	// `vpncli server bootstrap` can finish rather than one to throw away.
 	spin = startSpinner(out, "connecting")
 	err = bootstrapServer(ctx, store, cfg, srv, dial, check, spin.say)
 	spin.stop()
 	if err != nil {
-		fmt.Fprintf(out, "the server is up but not configured: `vpncli bootstrap %d` tries again\n", srv.ID)
+		fmt.Fprintf(out, "the server is up but not configured: `vpncli server bootstrap %d` tries again\n", srv.ID)
 		return err
 	}
 

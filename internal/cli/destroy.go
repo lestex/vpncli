@@ -24,7 +24,7 @@ func newDestroyCommand() *cobra.Command {
 		Short: "Destroy a server and forget it",
 		Long: `Delete a server at the provider, then drop its row from local state.
 
-The id is the short local one from ` + "`vpncli list`" + `, not the provider's.
+The id is the short local one from ` + "`vpncli server list`" + `, not the provider's.
 
 The provider goes first. A server already gone there is not an error - the row
 is exactly what needs clearing - but a delete that genuinely fails leaves the
@@ -35,7 +35,7 @@ Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return fmt.Errorf("%q is not a server id: `vpncli list` shows them", args[0])
+				return fmt.Errorf("%q is not a server id: `vpncli server list` shows them", args[0])
 			}
 			return runDestroy(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), openProvider, id, yes)
 		},

@@ -3,7 +3,9 @@ package cli
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -15,7 +17,11 @@ import (
 // through it is what keeps a listing from the API and one from local state
 // looking the same - the only difference is which id the first column shows.
 type row struct {
-	id        string
+	id string
+	// provider is empty for a listing that came from one provider's own API,
+	// where naming it on every line would say nothing. Local state holds
+	// servers from several, so there it is the column that tells them apart.
+	provider  string
 	name      string
 	region    string
 	size      string
@@ -51,6 +57,7 @@ func printServers(w io.Writer, servers []state.Server) error {
 	for _, srv := range servers {
 		rows = append(rows, row{
 			id:        strconv.FormatInt(srv.ID, 10),
+			provider:  srv.Provider,
 			name:      srv.Name,
 			region:    srv.Region,
 			size:      srv.Size,
@@ -70,12 +77,23 @@ func printRows(w io.Writer, rows []row) error {
 		return err
 	}
 
+	// The provider column appears only where it distinguishes anything: a
+	// listing straight from one provider's API is all one provider.
+	named := slices.ContainsFunc(rows, func(r row) bool { return r.provider != "" })
+
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tREGION\tSIZE\tIMAGE\tIPV4\tSTATUS\tAGE")
+	header := []string{"ID", "PROVIDER", "NAME", "REGION", "SIZE", "IMAGE", "IPV4", "STATUS", "AGE"}
+	if !named {
+		header = slices.DeleteFunc(header, func(c string) bool { return c == "PROVIDER" })
+	}
+	fmt.Fprintln(tw, strings.Join(header, "\t"))
 
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.id,
+		fields := []string{r.id}
+		if named {
+			fields = append(fields, orDash(r.provider))
+		}
+		fields = append(fields,
 			orDash(r.name),
 			orDash(r.region),
 			orDash(r.size),
@@ -84,6 +102,7 @@ func printRows(w io.Writer, rows []row) error {
 			orDash(r.status),
 			age(r.createdAt),
 		)
+		fmt.Fprintln(tw, strings.Join(fields, "\t"))
 	}
 
 	return tw.Flush()

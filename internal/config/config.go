@@ -18,7 +18,7 @@ const AppName = "vpncli"
 
 // Config is the persisted user configuration. Every field is optional: the
 // wizard fills it in over several versions, so a partially complete file is
-// normal and must not be an error. What `vpncli provision` needs of it is
+// normal and must not be an error. What `vpncli server provision` needs of it is
 // checked at provision time, where the message can name the missing answer.
 type Config struct {
 	// Provider is the provider slug, e.g. "digitalocean".

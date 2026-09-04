@@ -92,7 +92,7 @@ func Open(path string) (*Store, error) {
 	}
 
 	// _pragma args are how modernc.org/sqlite takes PRAGMAs. WAL keeps reads
-	// (`vpncli list`) from blocking on a provision in another terminal.
+	// (`vpncli server list`) from blocking on a provision in another terminal.
 	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

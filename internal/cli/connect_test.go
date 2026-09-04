@@ -170,7 +170,7 @@ func TestConnectOnAnUnconfiguredServer(t *testing.T) {
 	if !errors.Is(err, client.ErrNotConfigured) {
 		t.Fatalf("got %v, want ErrNotConfigured", err)
 	}
-	if !strings.Contains(err.Error(), "vpncli bootstrap 1") {
+	if !strings.Contains(err.Error(), "vpncli server bootstrap 1") {
 		t.Errorf("error %q does not say how to fix it", err)
 	}
 }

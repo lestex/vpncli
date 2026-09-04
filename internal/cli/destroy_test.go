@@ -143,7 +143,7 @@ func TestConfirmDestroy(t *testing.T) {
 
 func TestDestroyHelpSaysWhichIDItTakes(t *testing.T) {
 	out := run(t, "destroy", "--help")
-	for _, want := range []string{"vpncli list", "local"} {
+	for _, want := range []string{"vpncli server list", "local"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("destroy help does not mention %q:\n%s", want, out)
 		}

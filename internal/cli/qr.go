@@ -8,10 +8,14 @@ import (
 	"rsc.io/qr"
 )
 
-// quietZone is the light border a QR code needs on every side. It is part of
-// the spec, not decoration: without it a scanner cannot find the code against
-// whatever is around it, which for a terminal is a wall of text.
-const quietZone = 4
+// quietZone is the light border a QR code needs on every side, in modules.
+//
+// The spec says four. Two is what is drawn here, with a blank line kept above
+// and below the code: on a screen, read at close range with nothing but a
+// prompt around it, a scanner finds the code either way, and every module of
+// border costs a column of a terminal that is often eighty wide. A printed
+// code, or one over a photograph, would want the full four.
+const quietZone = 2
 
 // Half a character cell. Drawing two rows of modules per line of text is what
 // keeps a code that is sixty modules wide from being sixty lines tall.
@@ -30,10 +34,13 @@ const (
 
 // printQR draws text as a QR code.
 //
-// Medium error correction: a code on a screen is not going to be creased or
-// printed badly, and every level above M makes it wider for nothing.
+// The lowest error correction level, because the failure it protects against
+// does not happen here: a code on a screen is not creased, smudged or printed
+// badly, it is read once from a foot away. For a link this long the level is
+// worth four columns and two rows, which is the difference between fitting an
+// eighty column terminal and not.
 func printQR(w io.Writer, text string) error {
-	code, err := qr.Encode(text, qr.M)
+	code, err := qr.Encode(text, qr.L)
 	if err != nil {
 		return fmt.Errorf("encoding a QR code: %w", err)
 	}

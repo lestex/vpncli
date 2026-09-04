@@ -248,6 +248,11 @@ func TestServiceDoesNotRunAsRoot(t *testing.T) {
 	if !strings.Contains(unit, "AmbientCapabilities=CAP_NET_BIND_SERVICE") {
 		t.Errorf("the service cannot bind 443 without root:\n%s", unit)
 	}
+	// Without this Xray cannot find geoip.dat, and the rule that blocks private
+	// addresses stops it starting at all.
+	if !strings.Contains(unit, "XRAY_LOCATION_ASSET="+sharePath) {
+		t.Errorf("the service is not told where its geo files are:\n%s", unit)
+	}
 }
 
 // What lands on the server has to be what was tested, from a host that has

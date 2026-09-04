@@ -267,6 +267,9 @@ Group=` + serviceGroup + `
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
+# Where geoip.dat lives. Without it the routing rule that blocks private
+# addresses cannot load, and Xray refuses to start rather than start without it.
+Environment=XRAY_LOCATION_ASSET=` + sharePath + `
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true

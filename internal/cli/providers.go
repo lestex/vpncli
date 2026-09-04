@@ -6,15 +6,26 @@ import (
 	"github.com/lestex/vpncli/internal/provider/digitalocean"
 )
 
-// newProvidersCommand groups the diagnostic commands that query provider
-// APIs directly, with no local state involved.
+// newProvidersCommand groups what is about a cloud account rather than about
+// a server: choosing one and what to create there, and looking at what it
+// already holds.
 func newProvidersCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "providers",
-		Short: "Query cloud provider APIs directly",
+		Short: "Choose a provider, and query one directly",
+		Long: `Which cloud servers are created on, and what is in the account.
+
+    vpncli providers init    the wizard: provider, region, size, image, key
+    vpncli providers do      every droplet in the DigitalOcean account
+
+Neither touches a server. The wizard writes config.yaml, which is what
+` + "`vpncli server provision`" + ` reads.`,
 	}
 
-	cmd.AddCommand(newDigitalOceanCommand())
+	cmd.AddCommand(
+		newDigitalOceanCommand(),
+		newInitCommand(),
+	)
 
 	return cmd
 }

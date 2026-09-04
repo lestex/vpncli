@@ -49,7 +49,7 @@ func TestProvisionWithNoConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for an empty config")
 	}
-	for _, want := range []string{"region", "size", "image", "ssh key", "camouflage", "vpncli init"} {
+	for _, want := range []string{"region", "size", "image", "ssh key", "camouflage", "vpncli providers init"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
@@ -128,7 +128,7 @@ func TestServerName(t *testing.T) {
 
 func TestProvisionHelpSaysWhatItDoesNotDoYet(t *testing.T) {
 	out := run(t, "server", "provision", "--help")
-	for _, want := range []string{"vpncli init", "vpncli server destroy", "Xray-core"} {
+	for _, want := range []string{"vpncli providers init", "vpncli server destroy", "Xray-core"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("provision help does not mention %q:\n%s", want, out)
 		}

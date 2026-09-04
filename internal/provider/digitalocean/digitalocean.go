@@ -1,6 +1,6 @@
 // Package digitalocean implements provider.VPSProvider for DigitalOcean. The
 // create, inspect and delete path is complete, as are the catalog lookups the
-// `vpncli init` wizard reads.
+// `vpncli providers init` wizard reads.
 package digitalocean
 
 import (

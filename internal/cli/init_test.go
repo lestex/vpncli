@@ -204,14 +204,14 @@ func savedConfig(t *testing.T) config.Config {
 }
 
 func TestInitIsRegistered(t *testing.T) {
-	out := run(t, "--help")
+	out := run(t, "providers", "--help")
 	if !strings.Contains(out, "init") {
-		t.Errorf("init is missing from root help:\n%s", out)
+		t.Errorf("init is missing from `vpncli providers` help:\n%s", out)
 	}
 }
 
 func TestInitRejectsArgs(t *testing.T) {
-	if _, err := execute("init", "unexpected"); err == nil {
+	if _, err := execute("providers", "init", "unexpected"); err == nil {
 		t.Error("expected an error for an unexpected positional argument")
 	}
 }
@@ -223,7 +223,7 @@ func TestInitRequiresToken(t *testing.T) {
 	t.Setenv("DIGITALOCEAN_TOKEN", "")
 	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 
-	_, err := execute("init")
+	_, err := execute("providers", "init")
 	if !errors.Is(err, digitalocean.ErrNoToken) {
 		t.Fatalf("got %v, want ErrNoToken", err)
 	}
@@ -752,7 +752,7 @@ func TestInitKeepsAConfiguredCamouflageOnTheMenu(t *testing.T) {
 
 // Provisioning needs a region, so the wizard has to say what it is for.
 func TestInitHelpNamesWhatItAsks(t *testing.T) {
-	out := run(t, "init", "--help")
+	out := run(t, "providers", "init", "--help")
 	for _, want := range []string{"region", "size", "image", "SSH key", "camouflage", "config.yaml", "DIGITALOCEAN_TOKEN"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("init help does not mention %q:\n%s", want, out)

@@ -35,7 +35,7 @@ server exactly where it was. That costs both servers for the couple of minutes
 in between, which is a few cents.
 
 The replacement is built from the current config, so it also picks up anything
-` + "`vpncli init`" + ` has changed since - a different region, size or camouflage.
+` + "`vpncli providers init`" + ` has changed since - a different region, size or camouflage.
 
 It gets a new local id, because it is a different server. Clients have to be
 reconfigured either way: the address and the keys they hold are both gone.

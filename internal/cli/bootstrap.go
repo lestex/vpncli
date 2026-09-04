@@ -109,7 +109,7 @@ func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, chec
 func bootstrapServer(ctx context.Context, store *state.Store, cfg config.Config, srv state.Server, dial dialFunc, check checkFunc, progress bootstrap.Progress) error {
 	host := cfg.Reality.Host()
 	if host == "" {
-		return fmt.Errorf("config has no camouflage: run `vpncli init`")
+		return fmt.Errorf("config has no camouflage: run `vpncli providers init`")
 	}
 
 	// The wizard checks this too, but a config can be edited by hand and a
@@ -117,7 +117,7 @@ func bootstrapServer(ctx context.Context, store *state.Store, cfg config.Config,
 	// server built on a site REALITY cannot relay looks perfectly healthy and
 	// refuses every client, so it is worth one TLS connection to find out now.
 	if _, err := check(ctx, host); errors.Is(err, reality.ErrUnsuitable) {
-		return fmt.Errorf("%w: run `vpncli init` and pick another", err)
+		return fmt.Errorf("%w: run `vpncli providers init` and pick another", err)
 	}
 
 	client, err := dial(ctx, ssh.Config{

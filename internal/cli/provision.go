@@ -22,7 +22,7 @@ func newProvisionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "provision",
 		Short: "Create a server from the configured answers",
-		Long: `Create a server using what ` + "`vpncli init`" + ` wrote, and wait for it to boot.
+		Long: `Create a server using what ` + "`vpncli providers init`" + ` wrote, and wait for it to boot.
 
 The row is recorded as soon as the provider accepts the request, before the
 wait: a server that exists but is not in state is invisible and still billed.
@@ -124,7 +124,7 @@ func createOptions(cfg config.Config) (provider.CreateOptions, error) {
 		}
 	}
 	if len(missing) > 0 {
-		return provider.CreateOptions{}, fmt.Errorf("config has no %s: run `vpncli init`", strings.Join(missing, ", "))
+		return provider.CreateOptions{}, fmt.Errorf("config has no %s: run `vpncli providers init`", strings.Join(missing, ", "))
 	}
 
 	name, err := serverName(cfg.Region)

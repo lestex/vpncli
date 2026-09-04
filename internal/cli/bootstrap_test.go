@@ -270,7 +270,7 @@ func TestBootstrapWithNoCamouflageConfigured(t *testing.T) {
 	seedServers(t, doomedServer())
 
 	_, err := captureBootstrap(t, dialing(newFakeSSH(), nil), 1)
-	if err == nil || !strings.Contains(err.Error(), "vpncli init") {
+	if err == nil || !strings.Contains(err.Error(), "vpncli providers init") {
 		t.Fatalf("got %v, want an error pointing at the wizard", err)
 	}
 }
@@ -308,7 +308,7 @@ func TestBootstrapRefusesAnUnusableCamouflage(t *testing.T) {
 	if !errors.Is(err, reality.ErrUnsuitable) {
 		t.Fatalf("got %v, want ErrUnsuitable", err)
 	}
-	if !strings.Contains(err.Error(), "vpncli init") {
+	if !strings.Contains(err.Error(), "vpncli providers init") {
 		t.Errorf("error %q does not say how to fix it", err)
 	}
 

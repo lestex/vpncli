@@ -345,7 +345,7 @@ func TestDialWithNothingToAuthenticateWith(t *testing.T) {
 	if !errors.Is(err, ErrNoAuth) {
 		t.Fatalf("got %v, want ErrNoAuth", err)
 	}
-	if !strings.Contains(err.Error(), "vpncli init") {
+	if !strings.Contains(err.Error(), "vpncli providers init") {
 		t.Errorf("error %q does not say how to fix it", err)
 	}
 }

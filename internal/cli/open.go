@@ -45,7 +45,7 @@ func openStore() (*state.Store, error) {
 }
 
 // openProvider builds the provider named in the config file. An empty field
-// means `vpncli init` has not been run, which is a normal state rather than an
+// means `vpncli providers init` has not been run, which is a normal state rather than an
 // error: it falls back to the first implementation.
 func openProvider(cfg config.Config) (provider.VPSProvider, error) {
 	name := cfg.Provider

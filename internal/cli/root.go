@@ -22,7 +22,6 @@ time.`,
 	}
 
 	root.AddCommand(
-		newInitCommand(),
 		newProvidersCommand(),
 		newServerCommand(),
 		newSyncCommand(),

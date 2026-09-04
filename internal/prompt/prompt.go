@@ -1,4 +1,4 @@
-// Package prompt asks the questions the `vpncli init` wizard is made of.
+// Package prompt asks the questions the `vpncli providers init` wizard is made of.
 //
 // It is deliberately a numbered list read off stdin rather than a full-screen
 // cursor menu. The wizard is a handful of questions asked once, and a plain

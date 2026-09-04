@@ -1,5 +1,5 @@
 // Package config handles vpncli's on-disk layout and the config file the
-// `vpncli init` wizard writes.
+// `vpncli providers init` wizard writes.
 package config
 
 import (

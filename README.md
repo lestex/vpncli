@@ -63,7 +63,7 @@ Set up where servers get created:
 
 ```sh
 export DIGITALOCEAN_TOKEN=dop_v1_...   # DIGITALOCEAN_ACCESS_TOKEN also works
-vpncli init
+vpncli providers init
 ```
 
 ```
@@ -127,7 +127,7 @@ Camouflage [www.microsoft.com]:
 ```
 
 An answer is either the number or the slug, and re-running the wizard offers
-the current value as the default, so `vpncli init` doubles as a way to change
+the current value as the default, so `vpncli providers init` doubles as a way to change
 one setting. Nothing is written until the last question is answered - Ctrl-C or
 Ctrl-D gets out of any question, and an abandoned wizard leaves no half-filled
 config behind.
@@ -409,26 +409,28 @@ The order is the important part: the replacement is created and confirmed to
 be serving *before* anything is destroyed, so a rotation that fails leaves the
 old server exactly where it was, and says so. Both are billed for the couple
 of minutes in between. The replacement is built from the current config, so it
-picks up anything `vpncli init` has changed since, and it gets a new local id,
+picks up anything `vpncli providers init` has changed since, and it gets a new local id,
 because it is a different server.
 
 ## Commands
 
 ```
-vpncli init                 interactive wizard, writes config.yaml
-vpncli server list          what local state knows about
+vpncli providers init       the wizard: provider, region, size, image, key
+vpncli providers do         every droplet in the account, from the API
+
 vpncli server provision     create a server and configure it
+vpncli server list          what local state knows about
+vpncli server connect 3     the link, QR or client config to reach one
 vpncli server bootstrap 3   configure one that is not configured yet
 vpncli server rotate 3      replace one with a fresh server
 vpncli server destroy 3     delete one and forget it
-vpncli server connect 3     the link, QR or client config to reach one
+
 vpncli sync                 reconcile local state against the provider
-vpncli providers do         every droplet in the account, from the API
 ```
 
-Everything that acts on a server is grouped under `server`. What is left at the
-top level is what is not about a particular server: the wizard, reconciling
-state, and asking a provider about the whole account.
+Everything that acts on a server is grouped under `server`, and everything
+about a cloud account under `providers`. What is left at the top level is
+`sync`, which is the one command that reconciles the two.
 
 ## Files
 

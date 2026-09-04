@@ -31,7 +31,11 @@ type fakeProvider struct {
 	sshKeys []provider.SSHKey
 	err     error
 
-	// The create path, which only the provision and destroy tests use.
+	// The create path, which only the provision, destroy and rotate tests use.
+	// createID is the provider id a new server comes back with: a test that
+	// already has one in state has to hand out a different one, exactly as a
+	// provider would.
+	createID  string
 	created   provider.CreateOptions
 	createErr error
 	ready     provider.VPSInstance
@@ -45,8 +49,12 @@ func (f *fakeProvider) CreateInstance(_ context.Context, opts provider.CreateOpt
 	if f.createErr != nil {
 		return provider.VPSInstance{}, f.createErr
 	}
+	id := f.createID
+	if id == "" {
+		id = "1001"
+	}
 	return provider.VPSInstance{
-		ID:        "1001",
+		ID:        id,
 		Name:      opts.Name,
 		Provider:  f.Name(),
 		Region:    opts.Region,

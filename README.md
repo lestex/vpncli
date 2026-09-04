@@ -7,10 +7,10 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v0.9.0 - end to end.** `vpncli provision` creates and configures a
-> server; `vpncli connect` prints the link, QR code or sing-box config to reach
-> it with. What is left is `rotate`, which is destroy plus provision in one
-> step. See [Roadmap](#roadmap).
+> **Status: v1.0.0 - the whole workflow.** `vpncli provision` creates and
+> configures a server, `vpncli connect` builds the client config to reach it
+> with, and `vpncli rotate` replaces it with a fresh one that shares nothing
+> with it. See [Roadmap](#roadmap).
 
 ## Why it is built this way
 
@@ -334,8 +334,8 @@ For a desktop, `--sing-box` writes a sing-box config instead - a SOCKS and HTTP
 proxy on `127.0.0.1:1080`, which needs no privileges:
 
 ```sh
-vpncli connect 3 --sing-box > vpn.json
-sing-box run -c vpn.json
+vpncli connect 3 --sing-box -o ~/vpn.json
+sing-box run -c ~/vpn.json
 ```
 
 A proxy only carries what is pointed at it, so a browser has to be told about
@@ -349,12 +349,17 @@ included, and DNS with them. Creating an interface and rewriting the routing
 table needs root:
 
 ```sh
-vpncli connect 3 --tun > vpn.json
-sudo sing-box run -c vpn.json
+vpncli connect 3 --tun -o ~/vpn.json
+sudo sing-box run -c ~/vpn.json
 ```
 
 Both carry the same tunnel and the same credentials; the difference is only
 where traffic enters it.
+
+`-o` is worth using over `>`. The file is created `0600`, because it carries
+the key to your server, and the command prints exactly how to run what it just
+wrote - which matters because a tun config run without root creates no
+interface and tunnels nothing, quietly.
 
 None of this calls an API or opens an SSH connection. Everything a client needs
 was recorded when the server was bootstrapped, so `connect` works offline and
@@ -367,11 +372,37 @@ the public key and the short id. The one field that is a free choice is
 `fp=chrome`, the TLS fingerprint the client imitates - the server never sees
 which one you picked.
 
-The rest of the workflow lands in a later version:
+Replace a server with a fresh one:
 
 ```sh
-vpncli rotate <id>       # destroy and replace: new IP, new keys
+vpncli rotate 3
 ```
+
+```
+Replace vpncli-ams3-0a910d (203.0.113.10, ams3, id 3)?
+A new server is created and configured first; this one is destroyed only
+once that has worked. Both are billed until then.
+Type yes to confirm: yes
+Replacing vpncli-ams3-0a910d (203.0.113.10) with vpncli-ams3-7d3a91 (s-1vcpu-1gb, ams3) on digitalocean...
+rotated in 3m24s: vpncli-ams3-0a910d is gone
+
+ID  NAME                REGION  SIZE         IMAGE             IPV4          STATUS  AGE
+4   vpncli-ams3-7d3a91  ams3    s-1vcpu-1gb  ubuntu-24-04-x64  203.0.113.44  active  just now
+
+Serving VLESS+REALITY on 203.0.113.44:443, camouflaged as www.samsung.com.
+Its address and keys are new, so every client needs `vpncli connect 4` again.
+```
+
+This is the workflow the whole program is shaped around. The replacement
+shares nothing with what it replaces - new address, new keypair - so whatever
+was learned about the old server describes something that no longer exists.
+
+The order is the important part: the replacement is created and confirmed to
+be serving *before* anything is destroyed, so a rotation that fails leaves the
+old server exactly where it was, and says so. Both are billed for the couple
+of minutes in between. The replacement is built from the current config, so it
+picks up anything `vpncli init` has changed since, and it gets a new local id,
+because it is a different server.
 
 ## Files
 
@@ -449,8 +480,8 @@ locally, so packaging can be rehearsed before the tag goes out.
 | v0.6.0 | ✅ Wizard: size + OS select |
 | v0.7.0 | ✅ Wizard: SSH key + REALITY camouflage; `provision` and `destroy` |
 | v0.8.0 | ✅ Xray-core bootstrap over SSH, nginx decoy, BBR, ufw lockdown |
-| **v0.9.0** | ✅ Client connect: `vless://` URI, sing-box config, QR |
-| v1.0.0 | `rotate`, error-message pass, docs |
+| v0.9.0 | ✅ Client connect: `vless://` URI, sing-box config, QR |
+| **v1.0.0** | ✅ `rotate`, tun mode, `connect -o` |
 
 ## Clients
 

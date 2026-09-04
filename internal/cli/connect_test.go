@@ -6,12 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lestex/vpncli/internal/client"
 	"github.com/lestex/vpncli/internal/state"
 )
+
+// connectableCredentials is what a bootstrap left behind, for the tests that
+// need a server somebody could actually connect to.
+var connectableCredentials = state.Credentials{
+	UUID:       "1e089a02-6d47-40e9-a61b-16ab4dadb97d",
+	PrivateKey: "cJfBGaGmB6cQpRnLxTt6qkZKmsxk4nB1FvJ8mQnZ3F4",
+	PublicKey:  "_NPSjQCr1-4xWfmNOCnhPx0moZusb4ND4s-f6FpX0VM",
+	ShortID:    "f2671bb145bdd37e",
+	Dest:       "www.apple.com:443",
+	ServerName: "www.apple.com",
+}
 
 // connectable seeds a configured server and returns it.
 func connectable(t *testing.T) state.Server {
@@ -25,15 +38,7 @@ func connectable(t *testing.T) state.Server {
 	}
 	defer store.Close()
 
-	credentials := state.Credentials{
-		UUID:       "1e089a02-6d47-40e9-a61b-16ab4dadb97d",
-		PrivateKey: "cJfBGaGmB6cQpRnLxTt6qkZKmsxk4nB1FvJ8mQnZ3F4",
-		PublicKey:  "_NPSjQCr1-4xWfmNOCnhPx0moZusb4ND4s-f6FpX0VM",
-		ShortID:    "f2671bb145bdd37e",
-		Dest:       "www.microsoft.com:443",
-		ServerName: "www.microsoft.com",
-	}
-	if err := store.SaveBootstrap(context.Background(), 1, credentials); err != nil {
+	if err := store.SaveBootstrap(context.Background(), 1, connectableCredentials); err != nil {
 		t.Fatalf("recording the bootstrap: %v", err)
 	}
 
@@ -51,9 +56,14 @@ func connect(t *testing.T, id int64, asQR, asSingBox bool) (string, error) {
 
 func connectAs(t *testing.T, id int64, asQR, asSingBox bool, mode client.Mode) (string, error) {
 	t.Helper()
+	return connectTo(t, id, asQR, asSingBox, mode, "")
+}
+
+func connectTo(t *testing.T, id int64, asQR, asSingBox bool, mode client.Mode, path string) (string, error) {
+	t.Helper()
 
 	var out bytes.Buffer
-	err := runConnect(context.Background(), &out, id, asQR, asSingBox, mode)
+	err := runConnect(context.Background(), &out, id, asQR, asSingBox, mode, path)
 	return out.String(), err
 }
 
@@ -254,5 +264,107 @@ func TestConnectSingBoxProxyStaysMinimal(t *testing.T) {
 		if strings.Contains(out, absent) {
 			t.Errorf("the proxy config carries %q, which only tun mode needs:\n%s", absent, out)
 		}
+	}
+}
+
+// A client config is the key to the server. Shell redirection leaves it
+// readable by anyone with an account on the machine; this does not.
+func TestConnectWritesTheConfigUnreadableByOthers(t *testing.T) {
+	srv := connectable(t)
+	path := filepath.Join(t.TempDir(), "vpn.json")
+
+	out, err := connectTo(t, srv.ID, false, true, client.Proxy, path)
+	if err != nil {
+		t.Fatalf("connect -o: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("%s is %04o, want 0600", path, perm)
+	}
+
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading it back: %v", err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(written, &config); err != nil {
+		t.Fatalf("what was written is not valid JSON: %v", err)
+	}
+
+	// Nothing but the report goes to stdout: the config is in the file.
+	if strings.Contains(out, "\"outbounds\"") {
+		t.Errorf("the config was printed as well as written:\n%s", out)
+	}
+	if !strings.Contains(out, path) {
+		t.Errorf("the command does not say where it wrote:\n%s", out)
+	}
+}
+
+// Running a tun config without root creates no interface and tunnels nothing,
+// which is a hard failure to recognize. The command that writes it says so.
+func TestConnectSaysHowToRunWhatItWrote(t *testing.T) {
+	srv := connectable(t)
+	dir := t.TempDir()
+
+	tun, err := connectTo(t, srv.ID, false, true, client.Tun, filepath.Join(dir, "tun.json"))
+	if err != nil {
+		t.Fatalf("connect --tun -o: %v", err)
+	}
+	if !strings.Contains(tun, "sudo sing-box run") {
+		t.Errorf("a tun config is not shown with root:\n%s", tun)
+	}
+
+	proxy, err := connectTo(t, srv.ID, false, true, client.Proxy, filepath.Join(dir, "proxy.json"))
+	if err != nil {
+		t.Fatalf("connect --sing-box -o: %v", err)
+	}
+	if strings.Contains(proxy, "sudo") {
+		t.Errorf("a proxy config does not need root:\n%s", proxy)
+	}
+	if !strings.Contains(proxy, "127.0.0.1") {
+		t.Errorf("a proxy config is not shown with its address:\n%s", proxy)
+	}
+}
+
+// A path that was written before with the other mode has to end up as what was
+// asked for now, not as whatever is already there.
+func TestConnectReplacesAConfigOfTheOtherMode(t *testing.T) {
+	srv := connectable(t)
+	path := filepath.Join(t.TempDir(), "vpn.json")
+
+	if _, err := connectTo(t, srv.ID, false, true, client.Proxy, path); err != nil {
+		t.Fatalf("writing the proxy config: %v", err)
+	}
+	if _, err := connectTo(t, srv.ID, false, true, client.Tun, path); err != nil {
+		t.Fatalf("writing the tun config: %v", err)
+	}
+
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading it back: %v", err)
+	}
+	if !strings.Contains(string(written), `"tun"`) || strings.Contains(string(written), `"mixed"`) {
+		t.Errorf("the file still holds the old mode:\n%s", written)
+	}
+}
+
+func TestConnectWritesTheLinkToAFileToo(t *testing.T) {
+	srv := connectable(t)
+	path := filepath.Join(t.TempDir(), "link.txt")
+
+	if _, err := connectTo(t, srv.ID, false, false, client.Proxy, path); err != nil {
+		t.Fatalf("connect -o: %v", err)
+	}
+
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading it back: %v", err)
+	}
+	if !strings.HasPrefix(string(written), "vless://") {
+		t.Errorf("the file holds %q, want the link", written)
 	}
 }

@@ -29,6 +29,7 @@ time.`,
 		newListCommand(),
 		newProvidersCommand(),
 		newProvisionCommand(),
+		newRotateCommand(),
 		newSyncCommand(),
 		newVersionCommand(),
 	)

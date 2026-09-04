@@ -97,6 +97,14 @@ func confirmDestroy(ctx context.Context, p *prompt.Prompter, srv state.Server) (
 		srv.Name, orDash(srv.IPv4), srv.Region, srv.ID)
 	p.Printf("Type yes to confirm: ")
 
+	return confirmed(ctx, p)
+}
+
+// confirmed reads the answer to a question that spends money or destroys
+// something. Anything but the word is a no, including an input that ended: a
+// script piping nothing in has not agreed to anything, and neither has someone
+// who typed "y" out of habit.
+func confirmed(ctx context.Context, p *prompt.Prompter) (bool, error) {
 	answer, err := p.ReadLine(ctx)
 	if errors.Is(err, prompt.ErrNoInput) {
 		return false, nil
@@ -104,6 +112,5 @@ func confirmDestroy(ctx context.Context, p *prompt.Prompter, srv state.Server) (
 	if err != nil {
 		return false, err
 	}
-
 	return strings.EqualFold(answer, "yes"), nil
 }

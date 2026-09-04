@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,7 @@ func newConnectCommand() *cobra.Command {
 		asQR      bool
 		asSingBox bool
 		asTun     bool
+		out       string
 	)
 
 	cmd := &cobra.Command{
@@ -37,9 +39,16 @@ Only what is pointed at it goes through the tunnel.
 
 Add ` + "`--tun`" + ` for the whole machine instead. That config creates a network
 interface and routes everything through it, including programs that have no
-proxy setting, and DNS with it. It has to run as root:
+proxy setting, and DNS with it. It has to run as root.
 
-    sudo sing-box run -c vpn.json
+` + "`-o`" + ` writes to a file rather than standard output, and is the better way to
+keep one: the file is created 0600, because a client config carries the key to
+your server, and the command then says exactly how to run it. Redirecting with
+` + "`>`" + ` leaves it world readable, and leaves an old config in place under a name
+that no longer describes it - which is a confusing way to find out that
+nothing is being tunneled.
+
+    vpncli connect 3 --tun -o ~/vpn.json
 
 No API call and no SSH: everything here was recorded when the server was
 bootstrapped, so this works offline and needs no token.`,
@@ -58,18 +67,19 @@ bootstrapped, so this works offline and needs no token.`,
 				// which one to write rather than needing both flags.
 				asSingBox, mode = true, client.Tun
 			}
-			return runConnect(cmd.Context(), cmd.OutOrStdout(), id, asQR, asSingBox, mode)
+			return runConnect(cmd.Context(), cmd.OutOrStdout(), id, asQR, asSingBox, mode, out)
 		},
 	}
 
 	cmd.Flags().BoolVar(&asQR, "qr", false, "draw the link as a QR code")
 	cmd.Flags().BoolVar(&asSingBox, "sing-box", false, "print a sing-box config (a loopback proxy)")
 	cmd.Flags().BoolVar(&asTun, "tun", false, "make that config route the whole machine, as root")
+	cmd.Flags().StringVarP(&out, "out", "o", "", "write to this file (0600) instead of standard output")
 	return cmd
 }
 
 // runConnect prints one server's client config.
-func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bool, mode client.Mode) error {
+func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bool, mode client.Mode, path string) error {
 	store, err := openStore()
 	if err != nil {
 		return err
@@ -86,13 +96,20 @@ func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bo
 		if err != nil {
 			return err
 		}
-		_, err = out.Write(config)
-		return err
+		if path == "" {
+			_, err = out.Write(config)
+			return err
+		}
+		return writeConfig(out, path, config, mode)
 	}
 
 	uri, err := client.URI(srv)
 	if err != nil {
 		return err
+	}
+
+	if path != "" {
+		return writeConfig(out, path, []byte(uri+"\n"), mode)
 	}
 
 	if !asQR {
@@ -110,5 +127,31 @@ func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bo
 	fmt.Fprintf(out, "\n%s\n", uri)
 	fmt.Fprintf(out, "\n%s, camouflaged as %s. The SNI has to match exactly.\n",
 		srv.Name, srv.Credentials.ServerName)
+	return nil
+}
+
+// writeConfig saves a client config and says how to use it.
+//
+// The mode is only known here, and it is the difference between a command that
+// works and one that silently does nothing - a tun config run without root
+// creates no interface, and a proxy config run with it still proxies nothing
+// until something is pointed at it.
+func writeConfig(out io.Writer, path string, content []byte, mode client.Mode) error {
+	// 0600 because this file is the key to the server. Shell redirection would
+	// have left it readable by anyone with an account here.
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+
+	fmt.Fprintf(out, "wrote %s\n", path)
+	if mode == client.Tun {
+		fmt.Fprintf(out, "  sudo sing-box run -c %s\n", path)
+		fmt.Fprintf(out, "\nIt routes the whole machine, so root is not optional: without it no\n")
+		fmt.Fprintf(out, "interface is created and nothing is tunneled.\n")
+		return nil
+	}
+	fmt.Fprintf(out, "  sing-box run -c %s\n", path)
+	fmt.Fprintf(out, "\nThat is a proxy on 127.0.0.1:%d. Only what is pointed at it goes through\n", client.SocksPort)
+	fmt.Fprintf(out, "the tunnel; `--tun` covers the whole machine instead.\n")
 	return nil
 }

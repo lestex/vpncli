@@ -7,11 +7,10 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v0.8.0 - `provision` produces a working server.** One command
-> creates a server, installs Xray-core, configures VLESS+REALITY, puts up a
-> decoy site and closes the firewall. What is missing is the client side:
-> building a `vless://` URI or a sing-box config from a server is v0.9.0. See
-> [Roadmap](#roadmap).
+> **Status: v0.9.0 - end to end.** `vpncli provision` creates and configures a
+> server; `vpncli connect` prints the link, QR code or sing-box config to reach
+> it with. What is left is `rotate`, which is destroy plus provision in one
+> step. See [Roadmap](#roadmap).
 
 ## Why it is built this way
 
@@ -294,11 +293,52 @@ error, but a delete that genuinely fails leaves the row alone: a server nothing
 knows about bills forever. `--yes` skips the question, and nothing else is
 accepted as a confirmation - not even `y`.
 
-The rest of the workflow lands in later versions:
+Connect to it:
 
 ```sh
-vpncli connect <id>      # bring up the local sing-box client
-vpncli connect <id> --qr # terminal QR for mobile clients
+vpncli connect 3
+```
+
+```
+vless://1e089a02-...@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&fp=chrome&pbk=_NPSjQ...&security=reality&sid=f2671bb145bdd37e&sni=www.microsoft.com&type=tcp#vpncli-ams3-0a910d
+```
+
+The link is the whole output, so it pipes:
+
+```sh
+vpncli connect 3 | pbcopy
+```
+
+For a phone, `--qr` draws the same link in the terminal, which gets it across
+without going through anything that keeps a copy:
+
+```sh
+vpncli connect 3 --qr
+```
+
+For a desktop, `--sing-box` writes a sing-box config instead - a SOCKS and HTTP
+proxy on `127.0.0.1:1080`, which needs no privileges and is what a browser
+wants:
+
+```sh
+vpncli connect 3 --sing-box > vpn.json
+sing-box run -c vpn.json
+```
+
+None of this calls an API or opens an SSH connection. Everything a client needs
+was recorded when the server was bootstrapped, so `connect` works offline and
+with no token - which matters, because the moment you want a config is usually
+the moment the network is unpleasant.
+
+Three fields have to match the server exactly, and getting one wrong looks the
+same from the outside as a connection that works and carries nothing: the SNI,
+the public key and the short id. The one field that is a free choice is
+`fp=chrome`, the TLS fingerprint the client imitates - the server never sees
+which one you picked.
+
+The rest of the workflow lands in a later version:
+
+```sh
 vpncli rotate <id>       # destroy and replace: new IP, new keys
 ```
 
@@ -323,6 +363,7 @@ internal/cli/                    cobra command tree
 internal/bootstrap/              turning a bare image into a server
 internal/reality/                REALITY key material
 internal/ssh/                    the connection the bootstrap runs over
+internal/client/                 credentials to a client config
 internal/manager/                provider + state, joined
 internal/provider/               VPSProvider interface and shared types
 internal/provider/digitalocean/  DigitalOcean implementation
@@ -376,16 +417,17 @@ locally, so packaging can be rehearsed before the tag goes out.
 | v0.5.0 | ✅ Wizard: provider + region select |
 | v0.6.0 | ✅ Wizard: size + OS select |
 | v0.7.0 | ✅ Wizard: SSH key + REALITY camouflage; `provision` and `destroy` |
-| **v0.8.0** | ✅ Xray-core bootstrap over SSH, nginx decoy, BBR, ufw lockdown |
-| v0.9.0 | Client connect: `vless://` URI, sing-box config, QR |
+| v0.8.0 | ✅ Xray-core bootstrap over SSH, nginx decoy, BBR, ufw lockdown |
+| **v0.9.0** | ✅ Client connect: `vless://` URI, sing-box config, QR |
 | v1.0.0 | `rotate`, error-message pass, docs |
 
 ## Clients
 
-Servers are standard VLESS+REALITY, so any current client works. On iOS,
+Servers are standard VLESS+REALITY, so any current client works, and
+`vpncli connect` speaks the two formats between them cover everything. On iOS,
 Shadowrocket (paid, most mature REALITY support) and Streisand (free, open
 source) both import from a `vless://` URI or QR code with no server-side
-accommodation.
+accommodation. On a desktop, sing-box takes the generated config directly.
 
 ## License
 

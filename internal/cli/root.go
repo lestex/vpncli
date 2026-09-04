@@ -23,6 +23,7 @@ time.`,
 
 	root.AddCommand(
 		newBootstrapCommand(),
+		newConnectCommand(),
 		newDestroyCommand(),
 		newInitCommand(),
 		newListCommand(),

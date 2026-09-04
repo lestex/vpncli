@@ -164,3 +164,32 @@ func TestPathsFallBackToHome(t *testing.T) {
 		t.Errorf("DatabasePath() = %q, want %q", gotDB, want)
 	}
 }
+
+func TestCamouflage(t *testing.T) {
+	got := Camouflage("www.apple.com")
+
+	if got.Dest != "www.apple.com:443" {
+		t.Errorf("dest = %q, want the host on 443", got.Dest)
+	}
+	if len(got.ServerNames) != 1 || got.ServerNames[0] != "www.apple.com" {
+		t.Errorf("server names = %v, want the host: a client presents this as its SNI", got.ServerNames)
+	}
+}
+
+func TestRealityHost(t *testing.T) {
+	tests := []struct {
+		dest string
+		want string
+	}{
+		{dest: "www.apple.com:443", want: "www.apple.com"},
+		// A config edited by hand may leave the port off.
+		{dest: "www.apple.com", want: "www.apple.com"},
+		{dest: "", want: ""},
+	}
+
+	for _, tt := range tests {
+		if got := (Reality{Dest: tt.dest}).Host(); got != tt.want {
+			t.Errorf("Reality{Dest: %q}.Host() = %q, want %q", tt.dest, got, tt.want)
+		}
+	}
+}

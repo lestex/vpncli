@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/digitalocean/godo"
@@ -24,6 +25,7 @@ type catalog struct {
 	regions godo.RegionsService
 	sizes   godo.SizesService
 	images  godo.ImagesService
+	keys    godo.KeysService
 }
 
 // ListRegions returns every region in the account's catalog, sorted by slug.
@@ -103,6 +105,31 @@ func (p *Provider) ListImages(ctx context.Context) ([]provider.Image, error) {
 		return strings.Compare(b.Slug, a.Slug)
 	})
 	return images, nil
+}
+
+// ListSSHKeys returns the public keys registered on the account, by name.
+//
+// Only keys already uploaded are offered. Creating one here would mean writing
+// a private key to disk on the user's behalf, and a key they generated is one
+// whose private half is already where their SSH agent expects it.
+func (p *Provider) ListSSHKeys(ctx context.Context) ([]provider.SSHKey, error) {
+	keys, err := listAll(ctx, p, "ssh keys", func(opt *godo.ListOptions) ([]godo.Key, *godo.Response, error) {
+		return p.catalog.keys.List(ctx, opt)
+	}, func(k godo.Key) provider.SSHKey {
+		return provider.SSHKey{
+			ID:          strconv.Itoa(k.ID),
+			Name:        k.Name,
+			Fingerprint: k.Fingerprint,
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	slices.SortFunc(keys, func(a, b provider.SSHKey) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return keys, nil
 }
 
 // listAll walks every page of a catalog endpoint, converting each entry as it

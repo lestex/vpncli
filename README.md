@@ -7,10 +7,10 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v0.6.0 - the wizard picks a server.** `vpncli init` asks for a
-> provider, a region, a size and an image, and writes `config.yaml`. That is
-> everything `provision` needs except the REALITY camouflage, which is the next
-> version. See [Roadmap](#roadmap).
+> **Status: v0.7.0 - servers can be created.** `vpncli init` asks for
+> everything a server needs, and `vpncli provision` creates one and waits for
+> it to boot. What it does not do yet is install Xray-core: the server comes up
+> as a stock OS image with the SSH key on it. See [Roadmap](#roadmap).
 
 ## Why it is built this way
 
@@ -90,12 +90,40 @@ Fetching images...
   4)  debian-12-x64     Debian 12 x64
 
 Image [ubuntu-24-04-x64]:
+
+Fetching SSH keys...
+
+This is the key the bootstrap logs in with. Pick one whose private
+half is on this machine.
+
+  1)  laptop       SHA256:2f8a...
+  2)  workstation  SHA256:9c1b...
+
+SSH key [laptop]:
+
+REALITY hides the server behind a real site: the handshake is that
+site's, so a probe sees only a visit to it. Best is somewhere near
+the server that nobody would think twice about.
+
+  1)  www.microsoft.com   large, CDN-fronted, boring to see in a log
+  2)  www.apple.com       same, and reached from everywhere
+  3)  www.samsung.com     widely mirrored, good outside the US
+  4)  dl.google.com       download endpoint, long connections look normal
+  5)  www.cloudflare.com  everywhere, though obviously a CDN
+  6)  other               type a hostname
+
+Camouflage [www.microsoft.com]:
 ```
 
 An answer is either the number or the slug, and re-running the wizard offers
 the current value as the default, so `vpncli init` doubles as a way to change
-one setting. Nothing is written until the last question is answered - an
-abandoned wizard leaves no half-filled config behind.
+one setting. Nothing is written until the last question is answered - Ctrl-C or
+Ctrl-D gets out of any question, and an abandoned wizard leaves no half-filled
+config behind.
+
+Ctrl-C is a cancel rather than a kill everywhere: a `provision` interrupted
+mid-wait still reports the server it created and the id to destroy it by. A
+second Ctrl-C kills outright.
 
 The menus are filtered on purpose, and each filter is a decision:
 
@@ -107,6 +135,15 @@ The menus are filtered on purpose, and each filter is a decision:
 - **Images** are Ubuntu and Debian only, newest first. The bootstrap is apt,
   nginx, ufw and a BBR sysctl, so offering Fedora would produce a server that
   never gets finished.
+- **SSH keys** are the ones already registered with the provider, offered by
+  name. vpncli never creates a key: one you uploaded is one whose private half
+  is already where your SSH agent expects it. An account with none is a dead
+  end, and the wizard says so rather than creating a server nobody can log in
+  to.
+- **Camouflage** is the site REALITY impersonates, written to the config as
+  both `dest` and `server_names`. The offered ones are large, CDN-fronted and
+  unremarkable; anything else can be typed. A good pick is near the server and
+  boring to be seen talking to.
 
 Answer the region and the rest can be taken on the Enter key: the defaults are
 the cheapest size in that region and the newest Ubuntu.
@@ -154,15 +191,61 @@ servers tagged `vpncli` that local state has never seen are adopted - which is
 how a second machine, or a run that died mid-provision, is picked back up.
 Untagged servers are left alone, because that listing covers the whole account.
 
-Provisioning commands land in later versions; the full workflow will be:
+Create a server from those answers:
 
 ```sh
-vpncli init              # interactive wizard, writes config.yaml
-vpncli provision         # create + bootstrap a server
+vpncli provision
+```
+
+```
+Creating vpncli-fra1-7d3a91 (s-1vcpu-1gb, fra1) on digitalocean...
+⠹ waiting for the server to be ready (38s)
+```
+
+```
+Creating vpncli-fra1-7d3a91 (s-1vcpu-1gb, fra1) on digitalocean...
+ready in 52s
+
+ID  NAME                REGION  SIZE         IMAGE             IPV4          STATUS  AGE
+3   vpncli-fra1-7d3a91  fra1    s-1vcpu-1gb  ubuntu-24-04-x64  203.0.113.10  active  just now
+```
+
+Booting takes about a minute, so the wait spins rather than sitting silent.
+Redirected into a pipe or a file it draws nothing, and neither does a terminal
+that says it is `dumb`.
+
+The row is written as soon as the provider accepts the request, before the wait
+for the server to boot. That ordering is deliberate: a server that exists but is
+in nobody's state file is invisible and still billed, so an interrupted wait
+leaves something `vpncli destroy` can clean up, and `vpncli sync` finds it from
+any machine.
+
+Xray-core and the REALITY camouflage are not installed yet (v0.8.0). What comes
+up today is a stock OS image with the chosen SSH key on it.
+
+Destroy one:
+
+```sh
+vpncli destroy 3
+```
+
+```
+Destroy vpncli-fra1-7d3a91 (203.0.113.10, fra1, id 3)? Its IP and keys are gone for good.
+Type yes to confirm: yes
+destroyed vpncli-fra1-7d3a91 (203.0.113.10)
+```
+
+The provider goes first, then the row. A server already gone there is not an
+error, but a delete that genuinely fails leaves the row alone: a server nothing
+knows about bills forever. `--yes` skips the question, and nothing else is
+accepted as a confirmation - not even `y`.
+
+The rest of the workflow lands in later versions:
+
+```sh
 vpncli connect <id>      # bring up the local sing-box client
 vpncli connect <id> --qr # terminal QR for mobile clients
 vpncli rotate <id>       # destroy and replace: new IP, new keys
-vpncli destroy <id>
 ```
 
 ## Files
@@ -230,8 +313,8 @@ locally, so packaging can be rehearsed before the tag goes out.
 | v0.3.0 | ✅ DigitalOcean create/delete, `WaitReady`, 429 backoff |
 | v0.4.0 | ✅ State wired into create/delete; `list` and `sync` |
 | v0.5.0 | ✅ Wizard: provider + region select |
-| **v0.6.0** | ✅ Wizard: size + OS select |
-| v0.7.0 | Wizard: REALITY camouflage; `provision` wiring |
+| v0.6.0 | ✅ Wizard: size + OS select |
+| **v0.7.0** | ✅ Wizard: SSH key + REALITY camouflage; `provision` and `destroy` |
 | v0.8.0 | Xray-core bootstrap over SSH, nginx decoy, BBR, ufw lockdown |
 | v0.9.0 | Client connect: `vless://` URI, sing-box config, QR |
 | v1.0.0 | `rotate`, error-message pass, docs |

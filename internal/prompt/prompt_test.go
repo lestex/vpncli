@@ -1,9 +1,11 @@
 package prompt
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 var regions = []Option{
@@ -18,7 +20,7 @@ func selectFrom(t *testing.T, input, defaultKey string) (int, string, error) {
 	t.Helper()
 
 	var out strings.Builder
-	i, err := New(strings.NewReader(input), &out).Select("Region", regions, defaultKey)
+	i, err := New(strings.NewReader(input), &out).Select(context.Background(), "Region", regions, defaultKey)
 	return i, out.String(), err
 }
 
@@ -150,7 +152,133 @@ func TestSelectPrintsEveryOption(t *testing.T) {
 
 func TestSelectWithNoOptions(t *testing.T) {
 	var out strings.Builder
-	if _, err := New(strings.NewReader(""), &out).Select("Region", nil, ""); err == nil {
+	if _, err := New(strings.NewReader(""), &out).Select(context.Background(), "Region", nil, ""); err == nil {
 		t.Fatal("expected an error when there is nothing to choose from")
 	}
+}
+
+// inputFrom runs one Input against scripted input.
+func inputFrom(t *testing.T, in, def string) (string, string, error) {
+	t.Helper()
+
+	var out strings.Builder
+	answer, err := New(strings.NewReader(in), &out).Input(context.Background(), "Hostname", def)
+	return answer, out.String(), err
+}
+
+func TestInput(t *testing.T) {
+	got, _, err := inputFrom(t, "  www.apple.com  \n", "")
+	if err != nil {
+		t.Fatalf("Input: %v", err)
+	}
+	if got != "www.apple.com" {
+		t.Errorf("Input() = %q, want it trimmed", got)
+	}
+}
+
+func TestInputEmptyAnswerTakesTheDefault(t *testing.T) {
+	got, out, err := inputFrom(t, "\n", "www.apple.com")
+	if err != nil {
+		t.Fatalf("Input: %v", err)
+	}
+	if got != "www.apple.com" {
+		t.Errorf("Input() = %q, want the default", got)
+	}
+	if !strings.Contains(out, "[www.apple.com]") {
+		t.Errorf("prompt does not show the default:\n%s", out)
+	}
+}
+
+// With no default there is no answer to infer, so the question comes back.
+func TestInputWithNoDefaultReasks(t *testing.T) {
+	got, out, err := inputFrom(t, "\nwww.apple.com\n", "")
+	if err != nil {
+		t.Fatalf("Input: %v", err)
+	}
+	if got != "www.apple.com" {
+		t.Errorf("Input() = %q, want the second answer", got)
+	}
+	if strings.Count(out, "Hostname") != 2 {
+		t.Errorf("the question was not asked again:\n%s", out)
+	}
+}
+
+// Ctrl-D is not a blank answer, it is the end of the wizard.
+func TestInputAtEndOfInput(t *testing.T) {
+	if _, _, err := inputFrom(t, "", "www.apple.com"); !errors.Is(err, ErrNoInput) {
+		t.Errorf("got %v, want ErrNoInput", err)
+	}
+}
+
+// A question on a terminal blocks until a line arrives. Ctrl-C has to be
+// answered before then, or the wizard cannot be got out of.
+func TestSelectGivesUpWhenTheContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var out strings.Builder
+	// A reader that never returns stands in for a terminal nobody is typing at.
+	_, err := New(blockingReader{}, &out).Select(ctx, "Region", regions, "")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+}
+
+func TestInputGivesUpWhenTheContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var out strings.Builder
+	_, err := New(blockingReader{}, &out).Input(ctx, "Hostname", "www.apple.com")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+}
+
+// The signal arrives while the question is already waiting, which is the case
+// that matters: the read is blocked and only the context can end it.
+func TestSelectGivesUpOnACancelWhileWaiting(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(10*time.Millisecond, cancel)
+
+	var out strings.Builder
+	_, err := New(blockingReader{}, &out).Select(ctx, "Region", regions, "")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+}
+
+func TestReadLine(t *testing.T) {
+	var out strings.Builder
+	got, err := New(strings.NewReader("  yes  \n"), &out).ReadLine(context.Background())
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if got != "yes" {
+		t.Errorf("ReadLine() = %q, want it trimmed", got)
+	}
+}
+
+func TestReadLineAtEndOfInput(t *testing.T) {
+	var out strings.Builder
+	if _, err := New(strings.NewReader(""), &out).ReadLine(context.Background()); !errors.Is(err, ErrNoInput) {
+		t.Errorf("got %v, want ErrNoInput", err)
+	}
+}
+
+func TestReadLineGivesUpWhenTheContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var out strings.Builder
+	if _, err := New(blockingReader{}, &out).ReadLine(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("got %v, want context.Canceled", err)
+	}
+}
+
+// blockingReader is a terminal with nobody at it: the read never returns.
+type blockingReader struct{}
+
+func (blockingReader) Read([]byte) (int, error) {
+	select {}
 }

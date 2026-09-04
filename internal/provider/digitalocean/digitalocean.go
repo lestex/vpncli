@@ -76,6 +76,7 @@ func New(token string) (*Provider, error) {
 		regions: client.Regions,
 		sizes:   client.Sizes,
 		images:  client.Images,
+		keys:    client.Keys,
 	}), nil
 }
 

@@ -28,12 +28,12 @@ func TestProvidersCommandIsRegistered(t *testing.T) {
 	}
 }
 
-func TestDigitalOceanListRequiresToken(t *testing.T) {
+func TestDigitalOceanRequiresToken(t *testing.T) {
 	// The command should name the variables, not fail inside an API call.
 	t.Setenv("DIGITALOCEAN_TOKEN", "")
 	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 
-	_, err := execute("providers", "do", "list")
+	_, err := execute("providers", "do")
 	if !errors.Is(err, digitalocean.ErrNoToken) {
 		t.Fatalf("got %v, want ErrNoToken", err)
 	}
@@ -47,13 +47,20 @@ func TestDigitalOceanListRequiresToken(t *testing.T) {
 func TestDigitalOceanAlias(t *testing.T) {
 	// The full name should work as well as the `do` short form.
 	out := run(t, "providers", "digitalocean", "--help")
-	if !strings.Contains(out, "list") {
+	if !strings.Contains(out, "droplet") {
 		t.Errorf("digitalocean alias did not resolve to the provider command:\n%s", out)
 	}
 }
 
-func TestDigitalOceanListRejectsArgs(t *testing.T) {
-	if _, err := execute("providers", "do", "list", "unexpected"); err == nil {
+// The listing is the command itself now, not something under it.
+func TestDigitalOceanHasNoSubcommands(t *testing.T) {
+	if _, err := execute("providers", "do", "list"); err == nil {
+		t.Error("`providers do list` was accepted, want the listing to be `providers do`")
+	}
+}
+
+func TestDigitalOceanRejectsArgs(t *testing.T) {
+	if _, err := execute("providers", "do", "unexpected"); err == nil {
 		t.Error("expected an error for an unexpected positional argument")
 	}
 }

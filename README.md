@@ -175,7 +175,7 @@ List every droplet in a DigitalOcean account, straight from the API:
 
 ```sh
 export DIGITALOCEAN_TOKEN=dop_v1_...   # DIGITALOCEAN_ACCESS_TOKEN also works
-vpncli providers do list
+vpncli providers do
 ```
 
 ```
@@ -423,7 +423,7 @@ vpncli server rotate 3      replace one with a fresh server
 vpncli server destroy 3     delete one and forget it
 vpncli server connect 3     the link, QR or client config to reach one
 vpncli sync                 reconcile local state against the provider
-vpncli providers do list    every droplet in the account, from the API
+vpncli providers do         every droplet in the account, from the API
 ```
 
 Everything that acts on a server is grouped under `server`. What is left at the
@@ -499,7 +499,7 @@ locally, so packaging can be rehearsed before the tag goes out.
 | Version | Scope |
 | --- | --- |
 | v0.1.0 | ✅ Scaffold: CLI, provider interface, config, SQLite schema |
-| v0.2.0 | ✅ DigitalOcean read-only: `ListInstances`, `providers do list` |
+| v0.2.0 | ✅ DigitalOcean read-only: `ListInstances`, `providers do` |
 | v0.3.0 | ✅ DigitalOcean create/delete, `WaitReady`, 429 backoff |
 | v0.4.0 | ✅ State wired into create/delete; `list` and `sync` |
 | v0.5.0 | ✅ Wizard: provider + region select |

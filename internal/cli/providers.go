@@ -19,26 +19,20 @@ func newProvidersCommand() *cobra.Command {
 	return cmd
 }
 
+// newDigitalOceanCommand lists the account, and is the whole of what there is
+// to ask a provider directly. There is no subcommand under it because there is
+// nothing else to say: everything that acts on a server goes through
+// `vpncli server`, which has local state to work from.
 func newDigitalOceanCommand() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:     "do",
 		Aliases: []string{"digitalocean"},
-		Short:   "DigitalOcean",
-	}
-
-	cmd.AddCommand(newDigitalOceanListCommand())
-
-	return cmd
-}
-
-func newDigitalOceanListCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List every droplet in the account",
+		Short:   "List every droplet in the DigitalOcean account",
 		Long: `List every droplet in the DigitalOcean account, straight from the API.
 
 This is not filtered to servers vpncli created. Seeing the account as it really
-is, is the point.
+is, is the point: it is how a token is confirmed to work, and how a server
+nobody is tracking turns up.
 
 Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 		Args: cobra.NoArgs,

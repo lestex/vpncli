@@ -114,7 +114,7 @@ func TestOpenProvider(t *testing.T) {
 		cfg     config.Config
 		wantErr string
 	}{
-		// Nothing writes the provider field until the wizard lands.
+		// An unset field means `vpncli init` has not been run yet.
 		{name: "unset falls back to the only implementation"},
 		{name: "named explicitly", cfg: config.Config{Provider: digitalocean.Name}},
 		{name: "not implemented yet", cfg: config.Config{Provider: "hetzner"}, wantErr: "hetzner"},

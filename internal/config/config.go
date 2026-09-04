@@ -16,9 +16,9 @@ import (
 const AppName = "vpncli"
 
 // Config is the persisted user configuration. Every field is optional: the
-// wizard fills it in over several steps (provider and region in v0.5.0, size
-// and image in v0.6.0, REALITY settings in v0.7.0) and writes what it has so
-// far, so a partially complete file is normal and must not be an error.
+// wizard fills it in over several versions - provider, region, size and image
+// are asked today, REALITY and the SSH key next - so a partially complete file
+// is normal and must not be an error.
 type Config struct {
 	// Provider is the provider slug, e.g. "digitalocean".
 	Provider string `yaml:"provider,omitempty"`

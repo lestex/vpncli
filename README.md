@@ -7,11 +7,10 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v0.4.0 - state wired in.** `vpncli list` and `vpncli sync` work
-> against the local store, and creating and destroying servers now records
-> what it did. There is still no `provision` command to drive it: choosing a
-> region, size and image is the wizard's job, and that starts at v0.5.0. See
-> [Roadmap](#roadmap).
+> **Status: v0.6.0 - the wizard picks a server.** `vpncli init` asks for a
+> provider, a region, a size and an image, and writes `config.yaml`. That is
+> everything `provision` needs except the REALITY camouflage, which is the next
+> version. See [Roadmap](#roadmap).
 
 ## Why it is built this way
 
@@ -48,6 +47,72 @@ make build      # produces ./vpncli
 vpncli version
 vpncli --help
 ```
+
+Set up where servers get created:
+
+```sh
+export DIGITALOCEAN_TOKEN=dop_v1_...   # DIGITALOCEAN_ACCESS_TOKEN also works
+vpncli init
+```
+
+```
+Answers are written to ~/.config/vpncli/config.yaml
+
+Provider: DigitalOcean (digitalocean), the only one implemented
+
+Fetching regions from digitalocean...
+
+Pick one close to you. Latency is the one cost a VPN cannot make back.
+
+  1)  ams3  Amsterdam 3
+  2)  fra1  Frankfurt 1
+  3)  nyc3  New York 3
+
+Region: 2
+
+Fetching sizes for fra1...
+
+A tunnel is network-bound, not CPU-bound. The cheapest size is the
+right answer far more often than not.
+
+  1)  s-1vcpu-512mb-10gb  $4/mo   512MB RAM  1 vCPU  10GB disk
+  2)  s-1vcpu-1gb         $6/mo   1GB RAM    1 vCPU  25GB disk
+  3)  s-1vcpu-2gb         $12/mo  2GB RAM    1 vCPU  50GB disk
+  4)  s-2vcpu-2gb         $18/mo  2GB RAM    2 vCPU  60GB disk
+
+Size [s-1vcpu-512mb-10gb]:
+
+Fetching images...
+
+  1)  ubuntu-24-04-x64  Ubuntu 24.04 (LTS) x64
+  2)  ubuntu-22-04-x64  Ubuntu 22.04 (LTS) x64
+  3)  debian-13-x64     Debian 13 x64
+  4)  debian-12-x64     Debian 12 x64
+
+Image [ubuntu-24-04-x64]:
+```
+
+An answer is either the number or the slug, and re-running the wizard offers
+the current value as the default, so `vpncli init` doubles as a way to change
+one setting. Nothing is written until the last question is answered - an
+abandoned wizard leaves no half-filled config behind.
+
+The menus are filtered on purpose, and each filter is a decision:
+
+- **Regions** the account cannot create in are left out.
+- **Sizes** are the cheapest few available in the chosen region. An account can
+  create some seventy, and a tunnel can use almost none of them. A size already
+  in the config stays on the menu whatever it costs, so re-running the wizard
+  never quietly takes one away.
+- **Images** are Ubuntu and Debian only, newest first. The bootstrap is apt,
+  nginx, ufw and a BBR sysctl, so offering Fedora would produce a server that
+  never gets finished.
+
+Answer the region and the rest can be taken on the Enter key: the defaults are
+the cheapest size in that region and the newest Ubuntu.
+
+It is a numbered list rather than a cursor-driven menu on purpose: this has to
+work over SSH and in a pipe, which is where a VPS is usually being set up from.
 
 List every droplet in a DigitalOcean account, straight from the API:
 
@@ -118,6 +183,7 @@ internal/manager/                provider + state, joined
 internal/provider/               VPSProvider interface and shared types
 internal/provider/digitalocean/  DigitalOcean implementation
 internal/config/                 config file + XDG paths
+internal/prompt/                 the wizard's questions
 internal/state/                  SQLite state store
 ```
 
@@ -131,6 +197,11 @@ billing where nobody can see it.
 ways that must stay behind it - Hetzner's SDK has native async waiters while
 DigitalOcean, Vultr and Linode need manual polling - so each implementation
 normalizes that inside its own `WaitReady`.
+
+The catalog lookups behind it return everything, sorted but unfiltered:
+unavailable regions and sizes included. Which of them are worth offering is a
+vpncli decision, and it lives in the wizard where it can be read and argued
+with, not scattered through the providers.
 
 ## Development
 
@@ -157,9 +228,9 @@ locally, so packaging can be rehearsed before the tag goes out.
 | v0.1.0 | ✅ Scaffold: CLI, provider interface, config, SQLite schema |
 | v0.2.0 | ✅ DigitalOcean read-only: `ListInstances`, `providers do list` |
 | v0.3.0 | ✅ DigitalOcean create/delete, `WaitReady`, 429 backoff |
-| **v0.4.0** | ✅ State wired into create/delete; `list` and `sync` |
-| v0.5.0 | Wizard: provider + region select |
-| v0.6.0 | Wizard: size + OS select |
+| v0.4.0 | ✅ State wired into create/delete; `list` and `sync` |
+| v0.5.0 | ✅ Wizard: provider + region select |
+| **v0.6.0** | ✅ Wizard: size + OS select |
 | v0.7.0 | Wizard: REALITY camouflage; `provision` wiring |
 | v0.8.0 | Xray-core bootstrap over SSH, nginx decoy, BBR, ufw lockdown |
 | v0.9.0 | Client connect: `vless://` URI, sing-box config, QR |

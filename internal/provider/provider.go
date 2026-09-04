@@ -114,7 +114,9 @@ type VPSProvider interface {
 	// IPv4 and is accepting TCP connections on port 22, or until ctx is done.
 	WaitReady(ctx context.Context, id string) (VPSInstance, error)
 
-	// Catalog lookups, used by the `vpncli init` wizard.
+	// Catalog lookups, used by the `vpncli init` wizard. ListRegions is
+	// ordered by slug: the wizard prints it as a numbered menu, so an order
+	// that shifts between calls would move the answers under the user.
 	ListRegions(ctx context.Context) ([]Region, error)
 	ListSizes(ctx context.Context) ([]Size, error)
 	ListImages(ctx context.Context) ([]Image, error)

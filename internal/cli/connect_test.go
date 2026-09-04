@@ -46,9 +46,14 @@ func connectable(t *testing.T) state.Server {
 
 func connect(t *testing.T, id int64, asQR, asSingBox bool) (string, error) {
 	t.Helper()
+	return connectAs(t, id, asQR, asSingBox, client.Proxy)
+}
+
+func connectAs(t *testing.T, id int64, asQR, asSingBox bool, mode client.Mode) (string, error) {
+	t.Helper()
 
 	var out bytes.Buffer
-	err := runConnect(context.Background(), &out, id, asQR, asSingBox)
+	err := runConnect(context.Background(), &out, id, asQR, asSingBox, mode)
 	return out.String(), err
 }
 
@@ -185,6 +190,69 @@ func TestConnectHelpSaysWhatItPrints(t *testing.T) {
 	for _, want := range []string{"vless://", "--qr", "--sing-box", "offline"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("connect help does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
+// A proxy tunnels only what is pointed at it. --tun is for the rest of the
+// machine, and the difference is the inbound.
+func TestConnectSingBoxTun(t *testing.T) {
+	srv := connectable(t)
+
+	out, err := connectAs(t, srv.ID, false, true, client.Tun)
+	if err != nil {
+		t.Fatalf("connect --tun: %v", err)
+	}
+
+	var config struct {
+		DNS struct {
+			Servers []struct {
+				Detour string `json:"detour"`
+			} `json:"servers"`
+		} `json:"dns"`
+		Inbounds []struct {
+			Type      string `json:"type"`
+			AutoRoute bool   `json:"auto_route"`
+		} `json:"inbounds"`
+		Route struct {
+			AutoDetectInterface bool `json:"auto_detect_interface"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal([]byte(out), &config); err != nil {
+		t.Fatalf("the output is not valid JSON: %v\n%s", err, out)
+	}
+
+	if len(config.Inbounds) != 1 || config.Inbounds[0].Type != "tun" {
+		t.Fatalf("inbounds = %+v, want one tun", config.Inbounds)
+	}
+	if !config.Inbounds[0].AutoRoute {
+		t.Error("the interface is created but nothing is routed through it")
+	}
+	// Without this the tunnel routes its own connection to the server into
+	// itself, and nothing works at all.
+	if !config.Route.AutoDetectInterface {
+		t.Error("the route to the server is not kept outside the tunnel")
+	}
+	// Lookups going out over the local network would be the one thing still in
+	// plain sight.
+	if len(config.DNS.Servers) == 0 || config.DNS.Servers[0].Detour != "proxy" {
+		t.Errorf("DNS = %+v, want it sent through the tunnel", config.DNS)
+	}
+}
+
+// Proxy mode is the one that needs no privileges, so it stays free of the
+// routing and DNS a tun config has to take over.
+func TestConnectSingBoxProxyStaysMinimal(t *testing.T) {
+	srv := connectable(t)
+
+	out, err := connect(t, srv.ID, false, true)
+	if err != nil {
+		t.Fatalf("connect --sing-box: %v", err)
+	}
+
+	for _, absent := range []string{"tun", "auto_route", "\"dns\"", "auto_detect_interface"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("the proxy config carries %q, which only tun mode needs:\n%s", absent, out)
 		}
 	}
 }

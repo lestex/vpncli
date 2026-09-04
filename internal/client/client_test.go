@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -136,7 +137,7 @@ func TestURINeedsAnAddress(t *testing.T) {
 func TestSingBox(t *testing.T) {
 	srv := configured()
 
-	raw, err := SingBox(srv)
+	raw, err := SingBox(srv, Proxy)
 	if err != nil {
 		t.Fatalf("SingBox: %v", err)
 	}
@@ -214,7 +215,7 @@ func TestSingBox(t *testing.T) {
 func TestSingBoxCarriesNoPrivateKey(t *testing.T) {
 	srv := configured()
 
-	raw, err := SingBox(srv)
+	raw, err := SingBox(srv, Proxy)
 	if err != nil {
 		t.Fatalf("SingBox: %v", err)
 	}
@@ -224,7 +225,40 @@ func TestSingBoxCarriesNoPrivateKey(t *testing.T) {
 }
 
 func TestSingBoxNeedsAConfiguredServer(t *testing.T) {
-	if _, err := SingBox(state.Server{ID: 3, IPv4: "203.0.113.10"}); !errors.Is(err, ErrNotConfigured) {
+	if _, err := SingBox(state.Server{ID: 3, IPv4: "203.0.113.10"}, Proxy); !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("got %v, want ErrNotConfigured", err)
+	}
+}
+
+// Tun mode is the same tunnel with a different way in, so the credentials must
+// come out identical - a difference here would be a second code path to keep
+// right.
+func TestSingBoxTunCarriesTheSameOutbound(t *testing.T) {
+	srv := configured()
+
+	proxy, err := SingBox(srv, Proxy)
+	if err != nil {
+		t.Fatalf("SingBox(Proxy): %v", err)
+	}
+	tun, err := SingBox(srv, Tun)
+	if err != nil {
+		t.Fatalf("SingBox(Tun): %v", err)
+	}
+
+	outbound := func(raw []byte) any {
+		var c struct {
+			Outbounds []any `json:"outbounds"`
+		}
+		if err := json.Unmarshal(raw, &c); err != nil {
+			t.Fatalf("parsing: %v", err)
+		}
+		return c.Outbounds[0]
+	}
+	if !reflect.DeepEqual(outbound(proxy), outbound(tun)) {
+		t.Errorf("the two modes describe different servers:\n%s\n%s", proxy, tun)
+	}
+
+	if strings.Contains(string(tun), srv.Credentials.PrivateKey) {
+		t.Error("the tun config carries the server's private key")
 	}
 }

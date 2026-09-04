@@ -135,6 +135,7 @@ func testProvider() *fakeProvider {
 func wizard(t *testing.T, vps *fakeProvider, answers string) (string, error) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 
 	var out bytes.Buffer
 	err := runInit(context.Background(), strings.NewReader(answers), &out,
@@ -206,7 +207,7 @@ func TestInitRequiresToken(t *testing.T) {
 }
 
 func TestInitWritesTheAnswers(t *testing.T) {
-	out, err := wizard(t, testProvider(), "2\n2\n3\n2\n2\n")
+	out, err := wizard(t, testProvider(), "2\n2\n3\n2\n\n2\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -238,7 +239,7 @@ func TestInitWritesTheAnswers(t *testing.T) {
 }
 
 func TestInitAcceptsSlugs(t *testing.T) {
-	if _, err := wizard(t, testProvider(), "ams3\ns-2vcpu-4gb\ndebian-12-x64\n\n\n"); err != nil {
+	if _, err := wizard(t, testProvider(), "ams3\ns-2vcpu-4gb\ndebian-12-x64\n\n\n\n"); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -251,7 +252,7 @@ func TestInitAcceptsSlugs(t *testing.T) {
 // Enter through the wizard and the result should be a server worth having:
 // the cheapest size in the chosen region, running the newest Ubuntu.
 func TestInitDefaultsToCheapestAndNewestUbuntu(t *testing.T) {
-	if _, err := wizard(t, testProvider(), "fra1\n\n\n\n\n"); err != nil {
+	if _, err := wizard(t, testProvider(), "fra1\n\n\n\n\n\n"); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -268,7 +269,7 @@ func TestInitDefaultsToCheapestAndNewestUbuntu(t *testing.T) {
 // neither is one the account cannot create at all.
 func TestInitOffersOnlySizesTheRegionHas(t *testing.T) {
 	// The size only ams3 has is typed anyway, and has to be turned down.
-	out, err := wizard(t, testProvider(), "fra1\ns-2vcpu-4gb\n2\n\n\n\n")
+	out, err := wizard(t, testProvider(), "fra1\ns-2vcpu-4gb\n2\n\n\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -303,7 +304,7 @@ func TestInitCapsTheSizeMenu(t *testing.T) {
 		})
 	}
 
-	out, err := wizard(t, vps, "fra1\n\n\n\n\n")
+	out, err := wizard(t, vps, "fra1\n\n\n\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -346,7 +347,7 @@ func TestInitKeepsAConfiguredSizeOnTheMenu(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n"), &out,
+	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n\n"), &out,
 		func(config.Config) (provider.VPSProvider, error) { return vps, nil })
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
@@ -363,7 +364,7 @@ func TestInitKeepsAConfiguredSizeOnTheMenu(t *testing.T) {
 // The bootstrap is apt, nginx, ufw and a sysctl. An image it cannot configure
 // would only produce a server that never gets finished.
 func TestInitOffersOnlySupportedDistributions(t *testing.T) {
-	out, err := wizard(t, testProvider(), "fra1\n\nfedora-42-x64\n1\n\n\n")
+	out, err := wizard(t, testProvider(), "fra1\n\nfedora-42-x64\n1\n\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -378,7 +379,7 @@ func TestInitOffersOnlySupportedDistributions(t *testing.T) {
 
 // Ubuntu is what the bootstrap is developed against, so it leads.
 func TestInitOrdersImagesByDistribution(t *testing.T) {
-	_, out, err := wizardOutput(t, testProvider(), "fra1\n\n\n\n\n")
+	_, out, err := wizardOutput(t, testProvider(), "fra1\n\n\n\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -447,7 +448,7 @@ func TestDescribeSize(t *testing.T) {
 // An unavailable region cannot take a droplet, so choosing it would only
 // produce a config that fails later.
 func TestInitSkipsUnavailableRegions(t *testing.T) {
-	out, err := wizard(t, testProvider(), "sfo1\n2\n\n\n\n\n")
+	out, err := wizard(t, testProvider(), "sfo1\n2\n\n\n\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -485,6 +486,7 @@ func TestInitReportsACatalogFailure(t *testing.T) {
 // the settings it does not ask about alone.
 func TestInitKeepsExistingSettings(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 
 	existing := config.Config{
 		Provider:   digitalocean.Name,
@@ -500,7 +502,7 @@ func TestInitKeepsExistingSettings(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n"), &out,
+	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n\n"), &out,
 		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
@@ -528,6 +530,7 @@ func TestInitKeepsExistingSettings(t *testing.T) {
 // on a terminal, so nothing but the context can get out of it.
 func TestInitStopsOnACanceledContext(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(10*time.Millisecond, cancel)
@@ -555,6 +558,7 @@ func (neverReads) Read([]byte) (int, error) {
 // Ctrl-D partway through must leave no half-answered config behind.
 func TestInitAbandonedWritesNothing(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 
 	var out bytes.Buffer
 	err := runInit(context.Background(), strings.NewReader(""), &out,
@@ -571,7 +575,7 @@ func TestInitAbandonedWritesNothing(t *testing.T) {
 // The key is offered by name: an account holds several and the IDs say
 // nothing about which laptop they came from.
 func TestInitOffersSSHKeysByName(t *testing.T) {
-	out, err := wizard(t, testProvider(), "fra1\n\n\nlaptop\n\n")
+	out, err := wizard(t, testProvider(), "fra1\n\n\nlaptop\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -600,6 +604,7 @@ func TestInitWithNoSSHKeys(t *testing.T) {
 // one of them is not a request to drop the rest.
 func TestInitKeepsEveryConfiguredSSHKey(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 
 	existing := config.Config{Provider: digitalocean.Name, Region: "fra1", SSHKeyIDs: []string{"11", "22"}}
 	if err := existing.Save(); err != nil {
@@ -607,7 +612,7 @@ func TestInitKeepsEveryConfiguredSSHKey(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n"), &out,
+	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n\n"), &out,
 		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
@@ -621,7 +626,7 @@ func TestInitKeepsEveryConfiguredSSHKey(t *testing.T) {
 // The camouflage answer has to reach the config as both halves REALITY needs:
 // somewhere to forward to, and the name a client is allowed to present.
 func TestInitWritesCamouflageAsDestAndSNI(t *testing.T) {
-	if _, err := wizard(t, testProvider(), "fra1\n\n\n\nwww.apple.com\n"); err != nil {
+	if _, err := wizard(t, testProvider(), "fra1\n\n\n\n\nwww.apple.com\n"); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -637,7 +642,7 @@ func TestInitWritesCamouflageAsDestAndSNI(t *testing.T) {
 // The offered sites suit a lot of people and nobody in particular, so a
 // hostname must be typeable.
 func TestInitAcceptsACustomCamouflageHost(t *testing.T) {
-	if _, err := wizard(t, testProvider(), "fra1\n\n\n\nother\nshop.example.de\n"); err != nil {
+	if _, err := wizard(t, testProvider(), "fra1\n\n\n\n\nother\nshop.example.de\n"); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -649,7 +654,7 @@ func TestInitAcceptsACustomCamouflageHost(t *testing.T) {
 // A URL or an address written into server_names is an SNI value no client can
 // present, and the failure would only show up at connect time.
 func TestInitRejectsACamouflageThatIsNotAHostname(t *testing.T) {
-	out, err := wizard(t, testProvider(), "fra1\n\n\n\nother\nhttps://www.apple.com/\nwww.apple.com\n")
+	out, err := wizard(t, testProvider(), "fra1\n\n\n\n\nother\nhttps://www.apple.com/\nwww.apple.com\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -696,6 +701,7 @@ func TestCamouflageHost(t *testing.T) {
 // A site chosen deliberately is not one of ours to replace.
 func TestInitKeepsAConfiguredCamouflageOnTheMenu(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 
 	existing := config.Config{
 		Provider: digitalocean.Name,
@@ -707,7 +713,7 @@ func TestInitKeepsAConfiguredCamouflageOnTheMenu(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n"), &out,
+	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n\n"), &out,
 		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
 	if err != nil {
 		t.Fatalf("runInit: %v", err)

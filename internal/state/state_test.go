@@ -2,7 +2,10 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -206,5 +209,183 @@ func TestMissingRowsReportNotFound(t *testing.T) {
 				t.Errorf("got %v, want ErrNotFound", err)
 			}
 		})
+	}
+}
+
+func sampleCredentials() Credentials {
+	return Credentials{
+		UUID:       "6f4a1e2c-1f1a-4c7b-9a3d-5d2f8b0c1e77",
+		PrivateKey: "cJfBGaGmB6cQpRnLxTt6qkZKmsxk4nB1FvJ8mQnZ3F4",
+		PublicKey:  "5H1lQeVXqQ0m8VbXZ1qkqzZ0k3sPq7dFf2C6bJmWnQ8",
+		ShortID:    "1a2b3c4d",
+		Dest:       "www.apple.com:443",
+		ServerName: "www.apple.com",
+	}
+}
+
+// The bootstrap is the only place these come from, and losing them means a
+// server nobody can connect to but which still bills.
+func TestSaveBootstrap(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	seeded, err := s.Insert(ctx, sampleServer())
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if seeded.Bootstrapped() {
+		t.Error("a freshly created server reports itself bootstrapped")
+	}
+
+	want := sampleCredentials()
+	if err := s.SaveBootstrap(ctx, seeded.ID, want); err != nil {
+		t.Fatalf("SaveBootstrap: %v", err)
+	}
+
+	got, err := s.Get(ctx, seeded.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Credentials != want {
+		t.Errorf("credentials = %+v, want %+v", got.Credentials, want)
+	}
+	if !got.Bootstrapped() {
+		t.Error("a bootstrapped server does not say so")
+	}
+	if !got.Credentials.Complete() {
+		t.Errorf("%+v is not complete enough to build a client config", got.Credentials)
+	}
+}
+
+func TestSaveHostKey(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	seeded, err := s.Insert(ctx, sampleServer())
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleEx"
+	if err := s.SaveHostKey(ctx, seeded.ID, hostKey); err != nil {
+		t.Fatalf("SaveHostKey: %v", err)
+	}
+
+	got, err := s.Get(ctx, seeded.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.SSHHostKey != hostKey {
+		t.Errorf("host key = %q, want %q", got.SSHHostKey, hostKey)
+	}
+}
+
+func TestSaveOnMissingRows(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	if err := s.SaveBootstrap(ctx, 42, sampleCredentials()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SaveBootstrap on a missing row = %v, want ErrNotFound", err)
+	}
+	if err := s.SaveHostKey(ctx, 42, "ssh-ed25519 AAAA"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SaveHostKey on a missing row = %v, want ErrNotFound", err)
+	}
+}
+
+// A database written by an older version has none of the bootstrap columns.
+// Opening it has to widen the table rather than fail, or an upgrade would
+// orphan whatever servers were already running.
+func TestOpenMigratesAnOlderDatabase(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.db")
+
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("opening a bare database: %v", err)
+	}
+	_, err = old.Exec(`
+		CREATE TABLE servers (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			provider    TEXT NOT NULL,
+			provider_id TEXT NOT NULL,
+			name        TEXT NOT NULL,
+			region      TEXT NOT NULL,
+			size        TEXT NOT NULL,
+			image       TEXT NOT NULL,
+			ipv4        TEXT NOT NULL DEFAULT '',
+			status      TEXT NOT NULL DEFAULT 'unknown',
+			created_at  TIMESTAMP NOT NULL,
+			updated_at  TIMESTAMP NOT NULL,
+			UNIQUE (provider, provider_id)
+		);
+		INSERT INTO servers (provider, provider_id, name, region, size, image, ipv4, status, created_at, updated_at)
+		VALUES ('digitalocean', '1001', 'vpncli-fra1-a1b2', 'fra1', 's-1vcpu-1gb', 'ubuntu-24-04-x64', '203.0.113.10', 'active', datetime('now'), datetime('now'));`)
+	if err != nil {
+		t.Fatalf("seeding an old database: %v", err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("opening an old database: %v", err)
+	}
+	defer s.Close()
+
+	servers, err := s.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(servers) != 1 || servers[0].Name != "vpncli-fra1-a1b2" {
+		t.Fatalf("got %+v, want the row that was already there", servers)
+	}
+	if servers[0].Bootstrapped() {
+		t.Error("a row from before the bootstrap existed claims to be bootstrapped")
+	}
+
+	// And the widened table has to be writable, not just readable.
+	if err := s.SaveBootstrap(ctx, servers[0].ID, sampleCredentials()); err != nil {
+		t.Fatalf("SaveBootstrap after migrating: %v", err)
+	}
+}
+
+// The database holds every server's REALITY private key. It is as sensitive as
+// an SSH key and gets the same permissions, on every open rather than only at
+// creation: a database from an earlier version arrives with whatever mode it
+// had.
+func TestOpenRestrictsPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := s.Insert(context.Background(), sampleServer()); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	s.Close()
+
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("loosening the mode: %v", err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopening: %v", err)
+	}
+	defer again.Close()
+
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		info, err := os.Stat(name)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("stat %s: %v", name, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("%s is %04o, want 0600: it holds private keys", filepath.Base(name), perm)
+		}
 	}
 }

@@ -262,3 +262,116 @@ func TestSingBoxTunCarriesTheSameOutbound(t *testing.T) {
 		t.Error("the tun config carries the server's private key")
 	}
 }
+
+// The server drops traffic to private addresses on purpose, so a tun config
+// that routes the local network into the tunnel turns a printer or a router
+// page into a connection refused from three countries away.
+func TestSingBoxTunKeepsTheLocalNetworkLocal(t *testing.T) {
+	raw, err := SingBox(configured(), Tun)
+	if err != nil {
+		t.Fatalf("SingBox(Tun): %v", err)
+	}
+
+	var config struct {
+		Route struct {
+			Rules []struct {
+				IPIsPrivate bool   `json:"ip_is_private"`
+				Outbound    string `json:"outbound"`
+			} `json:"rules"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+
+	var found bool
+	for _, rule := range config.Route.Rules {
+		if rule.IPIsPrivate && rule.Outbound == "direct" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("nothing keeps private addresses out of the tunnel:\n%s", raw)
+	}
+}
+
+// A proxy carries only what is pointed at it, so it has no routing to do and
+// nothing to keep out of the way.
+func TestSingBoxProxyHasNoRouting(t *testing.T) {
+	raw, err := SingBox(configured(), Proxy)
+	if err != nil {
+		t.Fatalf("SingBox(Proxy): %v", err)
+	}
+	if strings.Contains(string(raw), "ip_is_private") {
+		t.Errorf("the proxy config carries tun routing:\n%s", raw)
+	}
+}
+
+// A client tries IPv6 first for anything dual stack. Against a server without
+// it, each attempt crosses the world to fail before the client falls back.
+func TestSingBoxTunRefusesIPv6WhenTheServerHasNone(t *testing.T) {
+	srv := configured()
+	srv.IPv6 = false
+
+	raw, err := SingBox(srv, Tun)
+	if err != nil {
+		t.Fatalf("SingBox(Tun): %v", err)
+	}
+
+	var config struct {
+		Inbounds []struct {
+			Address []string `json:"address"`
+		} `json:"inbounds"`
+		Route struct {
+			Rules []struct {
+				IPVersion int    `json:"ip_version"`
+				Action    string `json:"action"`
+				Outbound  string `json:"outbound"`
+			} `json:"rules"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+
+	// No address on the interface, because an address is a promise the tunnel
+	// cannot keep.
+	for _, address := range config.Inbounds[0].Address {
+		if strings.Contains(address, ":") {
+			t.Errorf("the interface has an IPv6 address %q the server cannot serve", address)
+		}
+	}
+
+	var refused bool
+	for _, rule := range config.Route.Rules {
+		if rule.IPVersion == 6 {
+			refused = true
+			// Refused, not routed direct: sending it out of the normal
+			// interface would be traffic leaving the tunnel.
+			if rule.Action != "reject" {
+				t.Errorf("IPv6 rule is %+v, want it rejected rather than sent around the tunnel", rule)
+			}
+		}
+	}
+	if !refused {
+		t.Errorf("nothing stops IPv6 going into a tunnel that cannot carry it:\n%s", raw)
+	}
+}
+
+// A server that has IPv6 should carry it, or the tunnel is worse than the
+// connection it replaces.
+func TestSingBoxTunCarriesIPv6WhenTheServerHasIt(t *testing.T) {
+	srv := configured()
+	srv.IPv6 = true
+
+	raw, err := SingBox(srv, Tun)
+	if err != nil {
+		t.Fatalf("SingBox(Tun): %v", err)
+	}
+	if !strings.Contains(string(raw), tunIPv6) {
+		t.Errorf("the interface has no IPv6 address:\n%s", raw)
+	}
+	if strings.Contains(string(raw), `"reject"`) {
+		t.Errorf("IPv6 is refused on a server that has it:\n%s", raw)
+	}
+}

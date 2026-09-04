@@ -281,3 +281,15 @@ func TestProvisionPointsAtBootstrapWhenConfiguringFails(t *testing.T) {
 		t.Error("a failed bootstrap marked the server configured")
 	}
 }
+
+// Clients try IPv6 first for anything dual stack, so a server without it turns
+// every one of those attempts into a round trip that ends in a refusal.
+func TestProvisionAsksForIPv6(t *testing.T) {
+	opts, err := createOptions(fullConfig())
+	if err != nil {
+		t.Fatalf("createOptions: %v", err)
+	}
+	if !opts.IPv6 {
+		t.Error("servers are created without IPv6")
+	}
+}

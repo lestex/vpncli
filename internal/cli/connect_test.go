@@ -38,7 +38,7 @@ func connectable(t *testing.T) state.Server {
 	}
 	defer store.Close()
 
-	if err := store.SaveBootstrap(context.Background(), 1, connectableCredentials); err != nil {
+	if err := store.SaveBootstrap(context.Background(), 1, connectableCredentials, false); err != nil {
 		t.Fatalf("recording the bootstrap: %v", err)
 	}
 

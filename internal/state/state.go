@@ -46,6 +46,9 @@ type Server struct {
 	// SSHHostKey is the key this server presented the first time we connected,
 	// in authorized_keys form. Empty until then.
 	SSHHostKey string
+	// IPv6 reports whether the server can reach the IPv6 internet, as found
+	// during the bootstrap.
+	IPv6 bool
 	// BootstrappedAt is when the server was configured. Zero means it is not.
 	BootstrappedAt time.Time
 }
@@ -157,6 +160,7 @@ var addedColumns = []struct{ name, definition string }{
 	{"reality_dest", "TEXT NOT NULL DEFAULT ''"},
 	{"reality_server_name", "TEXT NOT NULL DEFAULT ''"},
 	{"ssh_host_key", "TEXT NOT NULL DEFAULT ''"},
+	{"has_ipv6", "INTEGER NOT NULL DEFAULT 0"},
 	{"bootstrapped_at", "TIMESTAMP"},
 }
 
@@ -301,15 +305,15 @@ func (s *Store) SaveHostKey(ctx context.Context, id int64, hostKey string) error
 // row unmarked and its credentials empty, which is exactly right: re-running
 // it generates fresh material and replaces whatever reached the server, so
 // there is never a half-written set of keys to reconcile.
-func (s *Store) SaveBootstrap(ctx context.Context, id int64, c Credentials) error {
+func (s *Store) SaveBootstrap(ctx context.Context, id int64, c Credentials, ipv6 bool) error {
 	now := time.Now().UTC()
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE servers
 		   SET uuid = ?, reality_private_key = ?, reality_public_key = ?,
 		       reality_short_id = ?, reality_dest = ?, reality_server_name = ?,
-		       bootstrapped_at = ?, updated_at = ?
+		       has_ipv6 = ?, bootstrapped_at = ?, updated_at = ?
 		 WHERE id = ?`,
-		c.UUID, c.PrivateKey, c.PublicKey, c.ShortID, c.Dest, c.ServerName, now, now, id)
+		c.UUID, c.PrivateKey, c.PublicKey, c.ShortID, c.Dest, c.ServerName, ipv6, now, now, id)
 	if err != nil {
 		return fmt.Errorf("recording the bootstrap of server %d: %w", id, err)
 	}
@@ -327,7 +331,7 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 
 const selectColumns = `SELECT id, provider, provider_id, name, region, size, image, ipv4, status, created_at, updated_at,
        uuid, reality_private_key, reality_public_key, reality_short_id, reality_dest, reality_server_name,
-       ssh_host_key, bootstrapped_at`
+       ssh_host_key, has_ipv6, bootstrapped_at`
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
 type scanner interface {
@@ -344,7 +348,7 @@ func scanServer(sc scanner) (Server, error) {
 		&srv.Size, &srv.Image, &srv.IPv4, &srv.Status, &srv.CreatedAt, &srv.UpdatedAt,
 		&srv.Credentials.UUID, &srv.Credentials.PrivateKey, &srv.Credentials.PublicKey,
 		&srv.Credentials.ShortID, &srv.Credentials.Dest, &srv.Credentials.ServerName,
-		&srv.SSHHostKey, &bootstrappedAt)
+		&srv.SSHHostKey, &srv.IPv6, &bootstrappedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Server{}, err

@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS servers (
     -- first connection trusts and records; every later one has to match.
     ssh_host_key TEXT NOT NULL DEFAULT '',
 
+    -- Whether the server can reach the IPv6 internet, as found during the
+    -- bootstrap. A client that assumes wrongly either leaks IPv6 out of the
+    -- tunnel or sends every IPv6 attempt abroad to fail.
+    has_ipv6 INTEGER NOT NULL DEFAULT 0,
+
     -- When the bootstrap finished. NULL means a server that exists but is not
     -- yet configured, which is what `vpncli bootstrap` is for.
     bootstrapped_at TIMESTAMP,

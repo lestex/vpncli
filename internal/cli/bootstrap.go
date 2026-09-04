@@ -150,6 +150,13 @@ func bootstrapServer(ctx context.Context, store *state.Store, cfg config.Config,
 		return err
 	}
 
+	// What the client config says about IPv6 has to match what the server can
+	// actually do, so it is asked rather than assumed.
+	ipv6, err := bootstrap.HasIPv6(ctx, client)
+	if err != nil {
+		return err
+	}
+
 	return store.SaveBootstrap(ctx, srv.ID, state.Credentials{
 		UUID:       material.UUID,
 		PrivateKey: material.PrivateKey,
@@ -157,5 +164,5 @@ func bootstrapServer(ctx context.Context, store *state.Store, cfg config.Config,
 		ShortID:    material.ShortID,
 		Dest:       opts.Dest,
 		ServerName: opts.ServerName,
-	})
+	}, ipv6)
 }

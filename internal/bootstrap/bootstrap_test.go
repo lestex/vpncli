@@ -435,3 +435,26 @@ func TestStepsMatchWhatRunDoes(t *testing.T) {
 		t.Error("Steps() is empty")
 	}
 }
+
+// A client config built on the wrong answer either leaks IPv6 out of the
+// tunnel or sends every attempt abroad to fail, so it is asked, not assumed.
+func TestHasIPv6(t *testing.T) {
+	tests := map[string]bool{
+		"default via fe80::1 dev eth0 metric 1024\n": true,
+		"":     false,
+		"\n\n": false,
+	}
+
+	for route, want := range tests {
+		f := newFakeRunner()
+		f.replies["ip -6 route"] = route
+
+		got, err := HasIPv6(context.Background(), f)
+		if err != nil {
+			t.Fatalf("HasIPv6(%q): %v", route, err)
+		}
+		if got != want {
+			t.Errorf("HasIPv6() = %v for route %q, want %v", got, route, want)
+		}
+	}
+}

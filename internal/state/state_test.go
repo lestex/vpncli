@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -345,5 +347,45 @@ func TestOpenMigratesAnOlderDatabase(t *testing.T) {
 	// And the widened table has to be writable, not just readable.
 	if err := s.SaveBootstrap(ctx, servers[0].ID, sampleCredentials()); err != nil {
 		t.Fatalf("SaveBootstrap after migrating: %v", err)
+	}
+}
+
+// The database holds every server's REALITY private key. It is as sensitive as
+// an SSH key and gets the same permissions, on every open rather than only at
+// creation: a database from an earlier version arrives with whatever mode it
+// had.
+func TestOpenRestrictsPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := s.Insert(context.Background(), sampleServer()); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	s.Close()
+
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("loosening the mode: %v", err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopening: %v", err)
+	}
+	defer again.Close()
+
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		info, err := os.Stat(name)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("stat %s: %v", name, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("%s is %04o, want 0600: it holds private keys", filepath.Base(name), perm)
+		}
 	}
 }

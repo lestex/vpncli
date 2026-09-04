@@ -11,6 +11,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -115,7 +116,34 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := restrict(path); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+// restrict makes the database readable only by its owner.
+//
+// It holds every server's REALITY private key, so it is as sensitive as an SSH
+// key and gets the same permissions. It is done on every open rather than only
+// at creation: a database made by an earlier version, or copied off a backup,
+// arrives with whatever mode it had.
+func restrict(path string) error {
+	if path == ":memory:" {
+		return nil
+	}
+
+	// WAL means the data lives in three files, and the other two are recreated
+	// by SQLite as it pleases. A file that is not there yet is not a problem;
+	// it will be created by a connection whose umask this process controls.
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		err := os.Chmod(name, 0o600)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("securing %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // addedColumns are the columns that arrived after the first release. The

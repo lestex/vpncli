@@ -394,6 +394,20 @@ can reach the provider's metadata service can hand out the account's own
 credentials - so without the rule a printer, a NAS or a router page is not
 slow, it is `connection refused` from three countries away.
 
+sing-box will log lines like this, and they are not a failure:
+
+```
+ERROR connection: report handshake success: connection refused
+```
+
+It means the tunnel connected and, by the time it had, the local application
+was gone. Browsers open speculative connections and cancel the losers, macOS
+races IPv4 against IPv6 and drops whichever answers second, and anything with
+a short connect timeout gives up before a round trip to another country
+finishes. The tunnel is working; something local stopped waiting. It is worth
+recognising rather than chasing, which is what a quarter of a second of
+latency does to software written for a local network.
+
 It also follows what the server can actually do about IPv6. Servers are created
 with an IPv6 address, and the bootstrap checks whether one really arrived. On a
 server that has it, the tunnel carries IPv6. On one that does not - anything

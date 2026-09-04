@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/lestex/vpncli/internal/config"
+	"github.com/lestex/vpncli/internal/reality"
 	"github.com/lestex/vpncli/internal/ssh"
 	"github.com/lestex/vpncli/internal/state"
 )
@@ -95,7 +96,17 @@ func captureBootstrap(t *testing.T, dial dialFunc, id int64) (string, error) {
 	t.Helper()
 
 	var out bytes.Buffer
-	err := runBootstrapCommand(context.Background(), &out, dial, id)
+	err := runBootstrapCommand(context.Background(), &out, dial, checksOut, id)
+	return out.String(), err
+}
+
+// captureBootstrapWith is captureBootstrap for the tests that care what the
+// camouflage check says.
+func captureBootstrapWith(t *testing.T, dial dialFunc, check checkFunc, id int64) (string, error) {
+	t.Helper()
+
+	var out bytes.Buffer
+	err := runBootstrapCommand(context.Background(), &out, dial, check, id)
 	return out.String(), err
 }
 
@@ -281,5 +292,30 @@ func TestBootstrapHelpExplainsWhenToUseIt(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("bootstrap help does not mention %q:\n%s", want, out)
 		}
+	}
+}
+
+// A camouflage site REALITY cannot relay makes a server that authenticates
+// clients and then fails every connection. Building one is worse than
+// refusing to.
+func TestBootstrapRefusesAnUnusableCamouflage(t *testing.T) {
+	withStateDir(t)
+	bootstrapReady(t)
+	seedServers(t, doomedServer())
+
+	f := newFakeSSH()
+	_, err := captureBootstrapWith(t, dialing(f, nil), rejects("www.microsoft.com"), 1)
+	if !errors.Is(err, reality.ErrUnsuitable) {
+		t.Fatalf("got %v, want ErrUnsuitable", err)
+	}
+	if !strings.Contains(err.Error(), "vpncli init") {
+		t.Errorf("error %q does not say how to fix it", err)
+	}
+
+	if len(f.commands) != 0 {
+		t.Errorf("the server was configured anyway: %v", f.commands)
+	}
+	if storedServers(t)[0].Bootstrapped() {
+		t.Error("the server was marked configured")
 	}
 }

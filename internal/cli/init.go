@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -16,12 +17,18 @@ import (
 	"github.com/lestex/vpncli/internal/config"
 	"github.com/lestex/vpncli/internal/prompt"
 	"github.com/lestex/vpncli/internal/provider"
+	"github.com/lestex/vpncli/internal/reality"
 )
 
 // openFunc builds the provider for a config. The command passes openProvider;
 // tests pass a fake, so the wizard can be walked end to end without a token or
 // a network.
 type openFunc func(config.Config) (provider.VPSProvider, error)
+
+// checkFunc inspects a camouflage site. The commands pass reality.Check;
+// tests pass a fake, because a test that reaches the internet to decide
+// whether it passes is a test that fails on a train.
+type checkFunc func(ctx context.Context, host string) (reality.Camouflage, error)
 
 func newInitCommand() *cobra.Command {
 	return &cobra.Command{
@@ -39,7 +46,7 @@ The menus are API calls, so DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN
 must be set.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runInit(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), openProvider)
+			return runInit(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), openProvider, reality.Check)
 		},
 	}
 }
@@ -49,7 +56,7 @@ must be set.`,
 // The file is written once, at the end. A wizard abandoned halfway through
 // would otherwise leave a config naming a provider and no region, which is
 // harder to spot than one that was never written.
-func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) error {
+func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc, check checkFunc) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -113,7 +120,7 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) er
 
 	// Camouflage is the one question with no API behind it, so it is asked
 	// last: everything that can fail on a token has already failed by here.
-	host, err := selectCamouflage(ctx, p, cfg.Reality.Host())
+	host, err := selectCamouflage(ctx, p, cfg.Reality.Host(), check)
 	if err != nil {
 		return err
 	}
@@ -398,15 +405,21 @@ func expandHome(path string) (string, error) {
 }
 
 // camouflageSites are the sites offered as REALITY destinations. A good one
-// speaks TLS 1.3 with X25519 and HTTP/2, is hosted behind a large CDN so the
-// traffic joins a crowd, and is unremarkable to be seen talking to from
-// wherever the server lives.
+// speaks TLS 1.3 and HTTP/2, is hosted behind a large CDN so the traffic joins
+// a crowd, is unremarkable to be seen talking to from wherever the server
+// lives - and sends a certificate small enough for REALITY to relay.
+//
+// That last one is not a preference. www.microsoft.com used to lead this list
+// and produced servers that authenticated clients and then failed every
+// connection: its certificate, staple and timestamps come to more than the
+// 8192 bytes REALITY can carry. Every entry here has been measured, and
+// whatever is chosen is measured again by reality.Check.
 var camouflageSites = []prompt.Option{
-	{Key: "www.microsoft.com", Label: "large, CDN-fronted, boring to see in a log"},
-	{Key: "www.apple.com", Label: "same, and reached from everywhere"},
-	{Key: "www.samsung.com", Label: "widely mirrored, good outside the US"},
-	{Key: "dl.google.com", Label: "download endpoint, long connections look normal"},
+	{Key: "www.samsung.com", Label: "widely mirrored, rarely on anyone's block list"},
 	{Key: "www.cloudflare.com", Label: "everywhere, though obviously a CDN"},
+	{Key: "github.com", Label: "small certificate, unremarkable from a developer machine"},
+	{Key: "dl.google.com", Label: "download endpoint, long connections look normal"},
+	{Key: "www.apple.com", Label: "reached from everywhere, but Xray warns it draws attention in China"},
 }
 
 // customCamouflage is the escape hatch key. It is not a hostname, so it cannot
@@ -414,7 +427,7 @@ var camouflageSites = []prompt.Option{
 const customCamouflage = "other"
 
 // selectCamouflage asks which site the server should look like.
-func selectCamouflage(ctx context.Context, p *prompt.Prompter, current string) (string, error) {
+func selectCamouflage(ctx context.Context, p *prompt.Prompter, current string, check checkFunc) (string, error) {
 	options := slices.Clone(camouflageSites)
 	// A host already configured stays on the menu even when it is not one of
 	// ours, so re-running the wizard cannot quietly replace a chosen site.
@@ -427,27 +440,64 @@ func selectCamouflage(ctx context.Context, p *prompt.Prompter, current string) (
 	p.Printf("site's, so a probe sees only a visit to it. Best is somewhere near\n")
 	p.Printf("the server that nobody would think twice about.\n\n")
 
-	i, err := p.Select(ctx, "Camouflage", options, defaultOf(current, options))
-	if err != nil {
-		return "", err
-	}
-	if options[i].Key != customCamouflage {
-		return options[i].Key, nil
-	}
-
+	// A site that turns out to be unusable sends the question round again
+	// rather than ending the wizard: nothing has been written yet, and losing
+	// four answered questions over one bad site would be its own small
+	// disaster.
 	for {
-		answer, err := p.Input(ctx, "Hostname", current)
+		i, err := p.Select(ctx, "Camouflage", options, defaultOf(current, options))
 		if err != nil {
 			return "", err
 		}
 
-		host, err := camouflageHost(answer)
-		if err != nil {
-			p.Printf("%v\n", err)
+		host := options[i].Key
+		if host == customCamouflage {
+			answer, err := p.Input(ctx, "Hostname", current)
+			if err != nil {
+				return "", err
+			}
+			if host, err = camouflageHost(answer); err != nil {
+				p.Printf("%v\n\n", err)
+				continue
+			}
+		}
+
+		host, err = checkCamouflage(ctx, p, host, check)
+		if errors.Is(err, reality.ErrUnsuitable) {
+			p.Printf("%v\n\nPick another one.\n\n", err)
 			continue
+		}
+		if err != nil {
+			return "", err
 		}
 		return host, nil
 	}
+}
+
+// checkCamouflage makes sure the chosen site can actually be hidden behind.
+//
+// A site REALITY cannot relay produces the worst failure this program has:
+// clients authenticate, the server logs nothing but a stranger being turned
+// away, and every connection dies at the handshake. It costs one TLS
+// connection to rule out here.
+//
+// A site that cannot be reached at all is a different matter - that is this
+// machine's network, not the site - so it is reported and accepted.
+func checkCamouflage(ctx context.Context, p *prompt.Prompter, host string, check checkFunc) (string, error) {
+	p.Printf("\nChecking %s...\n", host)
+
+	found, err := check(ctx, host)
+	switch {
+	case errors.Is(err, reality.ErrUnsuitable):
+		return "", err
+	case err != nil:
+		p.Printf("Could not check it: %v\n", err)
+		p.Printf("Taking it anyway. If clients cannot connect, this is the first thing to change.\n")
+		return host, nil
+	}
+
+	p.Printf("Looks right: TLS 1.3, HTTP/2, %d byte certificate.\n", found.Handshake)
+	return host, nil
 }
 
 // camouflageHost validates a typed hostname. It has to be a bare host: a URL

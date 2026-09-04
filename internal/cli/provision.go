@@ -14,6 +14,7 @@ import (
 	"github.com/lestex/vpncli/internal/config"
 	"github.com/lestex/vpncli/internal/manager"
 	"github.com/lestex/vpncli/internal/provider"
+	"github.com/lestex/vpncli/internal/reality"
 	"github.com/lestex/vpncli/internal/state"
 )
 
@@ -34,7 +35,7 @@ Installing Xray-core and the REALITY camouflage is v0.8.0.
 Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runProvision(cmd.Context(), cmd.OutOrStdout(), openProvider, dialSSH)
+			return runProvision(cmd.Context(), cmd.OutOrStdout(), openProvider, dialSSH, reality.Check)
 		},
 	}
 }
@@ -42,7 +43,7 @@ Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 // runProvision creates one server and reports it. The provider is opened
 // through a func so a test can walk the whole path without a token, which is
 // the only way to exercise what happens when a create half succeeds.
-func runProvision(ctx context.Context, out io.Writer, open openFunc, dial dialFunc) error {
+func runProvision(ctx context.Context, out io.Writer, open openFunc, dial dialFunc, check checkFunc) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -86,7 +87,7 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc, dial dialFu
 	// Its row is already written, so a bootstrap that fails leaves a server
 	// `vpncli bootstrap` can finish rather than one to throw away.
 	spin = startSpinner(out, "connecting")
-	err = bootstrapServer(ctx, store, cfg, srv, dial, spin.say)
+	err = bootstrapServer(ctx, store, cfg, srv, dial, check, spin.say)
 	spin.stop()
 	if err != nil {
 		fmt.Fprintf(out, "the server is up but not configured: `vpncli bootstrap %d` tries again\n", srv.ID)

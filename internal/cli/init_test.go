@@ -16,6 +16,7 @@ import (
 	"github.com/lestex/vpncli/internal/prompt"
 	"github.com/lestex/vpncli/internal/provider"
 	"github.com/lestex/vpncli/internal/provider/digitalocean"
+	"github.com/lestex/vpncli/internal/reality"
 )
 
 // fakeProvider is a provider that only answers catalog lookups. The interface
@@ -113,6 +114,20 @@ func testImages() []provider.Image {
 	}
 }
 
+// checksOut accepts any camouflage site, so the wizard tests never reach the
+// internet to find out whether they pass.
+func checksOut(context.Context, string) (reality.Camouflage, error) {
+	return reality.Camouflage{Handshake: 3200, TLS13: true, HTTP2: true}, nil
+}
+
+// rejects turns a site down, for the tests about what happens then.
+func rejects(host string) checkFunc {
+	return func(context.Context, string) (reality.Camouflage, error) {
+		return reality.Camouflage{Handshake: 9000, TLS13: true, HTTP2: true},
+			fmt.Errorf("%w: %s sends a 9000 byte certificate", reality.ErrUnsuitable, host)
+	}
+}
+
 func testSSHKeys() []provider.SSHKey {
 	return []provider.SSHKey{
 		{ID: "11", Name: "laptop", Fingerprint: "aa:bb:cc"},
@@ -139,7 +154,7 @@ func wizard(t *testing.T, vps *fakeProvider, answers string) (string, error) {
 
 	var out bytes.Buffer
 	err := runInit(context.Background(), strings.NewReader(answers), &out,
-		func(config.Config) (provider.VPSProvider, error) { return vps, nil })
+		func(config.Config) (provider.VPSProvider, error) { return vps, nil }, checksOut)
 	return out.String(), err
 }
 
@@ -348,7 +363,7 @@ func TestInitKeepsAConfiguredSizeOnTheMenu(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n\n"), &out,
-		func(config.Config) (provider.VPSProvider, error) { return vps, nil })
+		func(config.Config) (provider.VPSProvider, error) { return vps, nil }, checksOut)
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -503,7 +518,7 @@ func TestInitKeepsExistingSettings(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n\n"), &out,
-		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil }, checksOut)
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -538,7 +553,7 @@ func TestInitStopsOnACanceledContext(t *testing.T) {
 	var out bytes.Buffer
 	// A reader that never returns is a terminal nobody is typing at.
 	err := runInit(ctx, neverReads{}, &out,
-		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil }, checksOut)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v, want context.Canceled", err)
 	}
@@ -562,7 +577,7 @@ func TestInitAbandonedWritesNothing(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runInit(context.Background(), strings.NewReader(""), &out,
-		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil }, checksOut)
 	if !errors.Is(err, prompt.ErrNoInput) {
 		t.Fatalf("got %v, want ErrNoInput", err)
 	}
@@ -613,7 +628,7 @@ func TestInitKeepsEveryConfiguredSSHKey(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n\n"), &out,
-		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil }, checksOut)
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -714,7 +729,7 @@ func TestInitKeepsAConfiguredCamouflageOnTheMenu(t *testing.T) {
 
 	var out bytes.Buffer
 	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n\n"), &out,
-		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil }, checksOut)
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -733,6 +748,68 @@ func TestInitHelpNamesWhatItAsks(t *testing.T) {
 	for _, want := range []string{"region", "size", "image", "SSH key", "camouflage", "config.yaml", "DIGITALOCEAN_TOKEN"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("init help does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
+// A site REALITY cannot relay produces a server that authenticates clients and
+// then fails every connection. The wizard asks again rather than writing it.
+func TestInitAsksAgainWhenTheCamouflageIsUnusable(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	// The first choice is turned down, the second is the one at index 2.
+	var out bytes.Buffer
+	err := runInit(context.Background(), strings.NewReader("fra1\n\n\n\n\n1\n3\n"), &out,
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil },
+		func(_ context.Context, host string) (reality.Camouflage, error) {
+			if host == camouflageSites[0].Key {
+				return reality.Camouflage{Handshake: 9000}, fmt.Errorf("%w: %s sends a 9000 byte certificate", reality.ErrUnsuitable, host)
+			}
+			return reality.Camouflage{Handshake: 3200, TLS13: true, HTTP2: true}, nil
+		})
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Pick another one") {
+		t.Errorf("the wizard does not say to choose again:\n%s", out.String())
+	}
+	if got := savedConfig(t).Reality.Host(); got != camouflageSites[2].Key {
+		t.Errorf("camouflage = %q, want the second answer %q", got, camouflageSites[2].Key)
+	}
+}
+
+// A site that cannot be reached is this machine's network rather than the
+// site, and the wizard is not the place to be stuck on it.
+func TestInitAcceptsACamouflageItCannotCheck(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	var out bytes.Buffer
+	err := runInit(context.Background(), strings.NewReader("fra1\n\n\n\n\n\n"), &out,
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil },
+		func(context.Context, string) (reality.Camouflage, error) {
+			return reality.Camouflage{}, errors.New("dial tcp: no route to host")
+		})
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Could not check it") {
+		t.Errorf("the wizard hides that the check did not run:\n%s", out.String())
+	}
+	if got := savedConfig(t).Reality.Host(); got != camouflageSites[0].Key {
+		t.Errorf("camouflage = %q, want it taken anyway", got)
+	}
+}
+
+// The list is not a matter of taste: an entry REALITY cannot relay is a broken
+// server, and www.microsoft.com was one.
+func TestCamouflageSitesAreNotKnownBadOnes(t *testing.T) {
+	for _, site := range camouflageSites {
+		if site.Key == "www.microsoft.com" {
+			t.Errorf("%s is offered again: its certificate is larger than REALITY can relay", site.Key)
 		}
 	}
 }

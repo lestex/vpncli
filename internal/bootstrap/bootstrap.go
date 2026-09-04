@@ -188,13 +188,19 @@ func installDecoy(ctx context.Context, c Runner, _ Options) error {
 	if err := c.Upload(ctx, decoyPath, 0o644, []byte(decoyPage)); err != nil {
 		return err
 	}
-	_, err := c.Run(ctx, "systemctl enable --now nginx >/dev/null 2>&1")
+	_, err := c.Run(ctx, "systemctl enable nginx >/dev/null 2>&1 && systemctl restart nginx")
 	return err
 }
 
-// startXray enables the service and starts it.
+// startXray enables the service and (re)starts it.
+//
+// It is a restart rather than `enable --now`, which does nothing at all when
+// the unit is already running. Re-running the bootstrap writes a fresh config
+// with fresh key material, and without a restart the server carries on serving
+// the old one - while local state records the new one. Every client then fails
+// with the server insisting they are strangers.
 func startXray(ctx context.Context, c Runner, _ Options) error {
-	_, err := c.Run(ctx, "systemctl enable --now xray >/dev/null 2>&1")
+	_, err := c.Run(ctx, "systemctl enable xray >/dev/null 2>&1 && systemctl restart xray")
 	return err
 }
 

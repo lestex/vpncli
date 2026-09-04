@@ -114,8 +114,8 @@ func TestRun(t *testing.T) {
 		"sysctl --system",
 		"sha256sum -c",
 		"systemctl daemon-reload",
-		"systemctl enable --now xray",
-		"systemctl enable --now nginx",
+		"systemctl restart xray",
+		"systemctl restart nginx",
 		"ufw --force enable",
 		"systemctl is-active xray",
 	} {
@@ -385,13 +385,33 @@ func TestStepsAreOrdered(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if !f.ranBefore(t, "upload "+configPath, "systemctl enable --now xray") {
+	if !f.ranBefore(t, "upload "+configPath, "systemctl restart xray") {
 		t.Error("xray is started before its config is written")
 	}
-	if !f.ranBefore(t, "systemctl enable --now xray", "ufw --force enable") {
+	if !f.ranBefore(t, "systemctl restart xray", "ufw --force enable") {
 		t.Error("the firewall closes before the server is up")
 	}
 	if !f.ranBefore(t, "sha256sum -c", "upload "+configPath) {
 		t.Error("the config is written before xray is installed")
+	}
+}
+
+// Re-running the bootstrap writes fresh key material. `systemctl enable --now`
+// does nothing to a unit that is already running, so the server would carry on
+// serving the old config while local state recorded the new one - and every
+// client would be turned away as a stranger.
+func TestXrayIsRestartedNotJustEnabled(t *testing.T) {
+	f := newFakeRunner()
+
+	if err := run(t, f, testOptions(t)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !f.ranSomething("systemctl restart xray") {
+		t.Errorf("xray is never restarted, so a rewritten config never takes effect:\n%s",
+			strings.Join(f.commands, "\n"))
+	}
+	if f.ranSomething("enable --now xray") {
+		t.Error("`enable --now` does nothing when the unit is already running")
 	}
 }

@@ -66,6 +66,11 @@ type CreateOptions struct {
 	// Bootstrap (v0.8.0) connects over SSH, so at least one is required.
 	SSHKeyIDs []string
 
+	// IPv6 asks for a routable IPv6 address as well as the IPv4 one. A
+	// tunnel whose server has no IPv6 is one where every client's IPv6
+	// attempt crosses the world to fail, and clients try IPv6 first.
+	IPv6 bool
+
 	// Tags are applied provider-side where supported, so `vpncli sync` can
 	// tell our servers apart from anything else in the account.
 	Tags []string

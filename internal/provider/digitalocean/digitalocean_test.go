@@ -519,8 +519,32 @@ func TestCreateInstance(t *testing.T) {
 	if req.WithDropletAgent == nil || *req.WithDropletAgent {
 		t.Error("the metrics agent should be turned off explicitly")
 	}
+	// Nothing is enabled that was not asked for - backups cost money, and
+	// IPv6 is the caller's decision because a client config has to match it.
 	if req.Backups || req.IPv6 {
 		t.Errorf("unrequested extras enabled: backups=%v ipv6=%v", req.Backups, req.IPv6)
+	}
+}
+
+// A server without IPv6 makes every client's IPv6 attempt a round trip that
+// ends in a refusal, so asking for it has to reach the request.
+func TestCreateInstanceAsksForIPv6(t *testing.T) {
+	d := droplet(1001, "vpncli-fra1-a1b2", "new")
+	f := &fakeDroplets{creates: []reply{ok(&d)}}
+
+	_, err := newTestProvider(f).CreateInstance(context.Background(), provider.CreateOptions{
+		Name:      "vpncli-fra1-a1b2",
+		Region:    "fra1",
+		Size:      "s-1vcpu-1gb",
+		Image:     "ubuntu-24-04-x64",
+		SSHKeyIDs: []string{"aa:bb:cc"},
+		IPv6:      true,
+	})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	if !f.createReqs[0].IPv6 {
+		t.Error("IPv6 was requested and the create call does not ask for it")
 	}
 }
 

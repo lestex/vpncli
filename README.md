@@ -394,6 +394,15 @@ can reach the provider's metadata service can hand out the account's own
 credentials - so without the rule a printer, a NAS or a router page is not
 slow, it is `connection refused` from three countries away.
 
+It also follows what the server can actually do about IPv6. Servers are created
+with an IPv6 address, and the bootstrap checks whether one really arrived. On a
+server that has it, the tunnel carries IPv6. On one that does not - anything
+provisioned before this was true - the config refuses IPv6 locally instead:
+clients try IPv6 first for anything dual stack, and every one of those attempts
+would otherwise cross the world to fail before falling back. Refused rather than
+sent around the tunnel, because IPv6 leaving by the normal interface is traffic
+leaving the tunnel.
+
 `-o` is worth using over `>`. The file is created `0600`, because it carries
 the key to your server, and the command prints exactly how to run what it just
 wrote - which matters because a tun config run without root creates no

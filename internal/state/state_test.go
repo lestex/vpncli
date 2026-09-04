@@ -238,7 +238,7 @@ func TestSaveBootstrap(t *testing.T) {
 	}
 
 	want := sampleCredentials()
-	if err := s.SaveBootstrap(ctx, seeded.ID, want); err != nil {
+	if err := s.SaveBootstrap(ctx, seeded.ID, want, true); err != nil {
 		t.Fatalf("SaveBootstrap: %v", err)
 	}
 
@@ -254,6 +254,12 @@ func TestSaveBootstrap(t *testing.T) {
 	}
 	if !got.Credentials.Complete() {
 		t.Errorf("%+v is not complete enough to build a client config", got.Credentials)
+	}
+	// What the server can do is remembered with the credentials: a client
+	// config built on the wrong answer either leaks IPv6 or wastes a round
+	// trip on every attempt.
+	if !got.IPv6 {
+		t.Error("the server's IPv6 was not recorded")
 	}
 }
 
@@ -284,7 +290,7 @@ func TestSaveOnMissingRows(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 
-	if err := s.SaveBootstrap(ctx, 42, sampleCredentials()); !errors.Is(err, ErrNotFound) {
+	if err := s.SaveBootstrap(ctx, 42, sampleCredentials(), false); !errors.Is(err, ErrNotFound) {
 		t.Errorf("SaveBootstrap on a missing row = %v, want ErrNotFound", err)
 	}
 	if err := s.SaveHostKey(ctx, 42, "ssh-ed25519 AAAA"); !errors.Is(err, ErrNotFound) {
@@ -345,7 +351,7 @@ func TestOpenMigratesAnOlderDatabase(t *testing.T) {
 	}
 
 	// And the widened table has to be writable, not just readable.
-	if err := s.SaveBootstrap(ctx, servers[0].ID, sampleCredentials()); err != nil {
+	if err := s.SaveBootstrap(ctx, servers[0].ID, sampleCredentials(), false); err != nil {
 		t.Fatalf("SaveBootstrap after migrating: %v", err)
 	}
 }

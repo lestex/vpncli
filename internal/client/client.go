@@ -48,7 +48,7 @@ const (
 // Tunnel addresses for Tun mode. They are private ranges chosen not to collide
 // with anything ordinary: the /30 and /126 are as small as an interface with
 // one address on each side can be.
-var (
+const (
 	tunIPv4 = "172.19.0.1/30"
 	tunIPv6 = "fdfe:dcba:9876::1/126"
 )
@@ -110,12 +110,12 @@ func usable(srv state.Server) error {
 
 // inbound is where traffic comes in, which is the whole difference between
 // the two modes.
-func inbound(mode Mode) any {
+func inbound(mode Mode, ipv6 bool) any {
 	if mode == Tun {
 		return singBoxTunInbound{
 			Type:        "tun",
 			Tag:         "tun-in",
-			Address:     []string{tunIPv4, tunIPv6},
+			Address:     tunAddresses(ipv6),
 			AutoRoute:   true,
 			StrictRoute: true,
 			// gvisor is a userspace network stack: slower than handing packets
@@ -132,6 +132,38 @@ func inbound(mode Mode) any {
 		Listen:     "127.0.0.1",
 		ListenPort: SocksPort,
 	}
+}
+
+// tunAddresses is what the interface gets. A server with no IPv6 gets no IPv6
+// interface: an address on it is a promise the tunnel cannot keep.
+func tunAddresses(ipv6 bool) []string {
+	if ipv6 {
+		return []string{tunIPv4, tunIPv6}
+	}
+	return []string{tunIPv4}
+}
+
+// tunRules is the routing a tun config needs.
+func tunRules(ipv6 bool) []singBoxRule {
+	rules := []singBoxRule{
+		// Everything on the local network stays on it. The server drops
+		// traffic to private addresses on purpose - a tunnel that can reach
+		// the provider's metadata service can hand out the account's own
+		// credentials - so without this rule a printer, a NAS or a router
+		// page is not slow, it is a connection refused from three countries
+		// away.
+		{IPIsPrivate: true, Outbound: "direct"},
+	}
+	if !ipv6 {
+		// A client tries IPv6 first for anything dual stack. Against a server
+		// without it, every one of those attempts crosses the world to fail
+		// and the client falls back a quarter of a second later. Refusing
+		// locally makes the fallback immediate - and refusing rather than
+		// routing direct is the point: IPv6 sent out of the normal interface
+		// would be traffic leaving the tunnel.
+		rules = append(rules, singBoxRule{IPVersion: 6, Action: "reject"})
+	}
+	return rules
 }
 
 // singBoxConfig is the shape sing-box reads. Only the fields that matter are
@@ -178,8 +210,10 @@ type singBoxRoute struct {
 }
 
 type singBoxRule struct {
-	IPIsPrivate bool   `json:"ip_is_private"`
-	Outbound    string `json:"outbound"`
+	IPIsPrivate bool   `json:"ip_is_private,omitempty"`
+	IPVersion   int    `json:"ip_version,omitempty"`
+	Outbound    string `json:"outbound,omitempty"`
+	Action      string `json:"action,omitempty"`
 }
 
 type singBoxLog struct {
@@ -238,7 +272,7 @@ func SingBox(srv state.Server, mode Mode) ([]byte, error) {
 
 	config := singBoxConfig{
 		Log:      singBoxLog{Level: "warn"},
-		Inbounds: []any{inbound(mode)},
+		Inbounds: []any{inbound(mode, srv.IPv6)},
 		Outbounds: []any{
 			singBoxOutbound{
 				Type:       "vless",
@@ -283,7 +317,7 @@ func SingBox(srv state.Server, mode Mode) ([]byte, error) {
 			// account's credentials - so without this rule a printer, a NAS
 			// or a router page is not slow or blocked, it is a connection
 			// refused from three countries away.
-			Rules: []singBoxRule{{IPIsPrivate: true, Outbound: "direct"}},
+			Rules: tunRules(srv.IPv6),
 		}
 	}
 

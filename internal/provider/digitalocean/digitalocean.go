@@ -279,6 +279,7 @@ func createRequest(opts provider.CreateOptions) (*godo.DropletCreateRequest, err
 		Size:   opts.Size,
 		Image:  createImage(opts.Image),
 		Tags:   opts.Tags,
+		IPv6:   opts.IPv6,
 		// The metrics agent is extra code running as root on a box whose whole
 		// point is to be unremarkable, and nothing here reads its data.
 		WithDropletAgent: godo.PtrTo(false),

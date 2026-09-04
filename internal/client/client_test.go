@@ -306,3 +306,72 @@ func TestSingBoxProxyHasNoRouting(t *testing.T) {
 		t.Errorf("the proxy config carries tun routing:\n%s", raw)
 	}
 }
+
+// A client tries IPv6 first for anything dual stack. Against a server without
+// it, each attempt crosses the world to fail before the client falls back.
+func TestSingBoxTunRefusesIPv6WhenTheServerHasNone(t *testing.T) {
+	srv := configured()
+	srv.IPv6 = false
+
+	raw, err := SingBox(srv, Tun)
+	if err != nil {
+		t.Fatalf("SingBox(Tun): %v", err)
+	}
+
+	var config struct {
+		Inbounds []struct {
+			Address []string `json:"address"`
+		} `json:"inbounds"`
+		Route struct {
+			Rules []struct {
+				IPVersion int    `json:"ip_version"`
+				Action    string `json:"action"`
+				Outbound  string `json:"outbound"`
+			} `json:"rules"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+
+	// No address on the interface, because an address is a promise the tunnel
+	// cannot keep.
+	for _, address := range config.Inbounds[0].Address {
+		if strings.Contains(address, ":") {
+			t.Errorf("the interface has an IPv6 address %q the server cannot serve", address)
+		}
+	}
+
+	var refused bool
+	for _, rule := range config.Route.Rules {
+		if rule.IPVersion == 6 {
+			refused = true
+			// Refused, not routed direct: sending it out of the normal
+			// interface would be traffic leaving the tunnel.
+			if rule.Action != "reject" {
+				t.Errorf("IPv6 rule is %+v, want it rejected rather than sent around the tunnel", rule)
+			}
+		}
+	}
+	if !refused {
+		t.Errorf("nothing stops IPv6 going into a tunnel that cannot carry it:\n%s", raw)
+	}
+}
+
+// A server that has IPv6 should carry it, or the tunnel is worse than the
+// connection it replaces.
+func TestSingBoxTunCarriesIPv6WhenTheServerHasIt(t *testing.T) {
+	srv := configured()
+	srv.IPv6 = true
+
+	raw, err := SingBox(srv, Tun)
+	if err != nil {
+		t.Fatalf("SingBox(Tun): %v", err)
+	}
+	if !strings.Contains(string(raw), tunIPv6) {
+		t.Errorf("the interface has no IPv6 address:\n%s", raw)
+	}
+	if strings.Contains(string(raw), `"reject"`) {
+		t.Errorf("IPv6 is refused on a server that has it:\n%s", raw)
+	}
+}

@@ -259,6 +259,20 @@ func verify(ctx context.Context, c Runner, _ Options) error {
 	return nil
 }
 
+// HasIPv6 reports whether the server can reach the IPv6 internet.
+//
+// Asking rather than assuming: a provider can be told to add an address and
+// not do it, an image can come up without configuring it, and a client config
+// built on the wrong answer produces either a stream of failures or traffic
+// that quietly leaves the tunnel.
+func HasIPv6(ctx context.Context, c Runner) (bool, error) {
+	out, err := c.Run(ctx, "ip -6 route show default 2>/dev/null || true")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
 // lastLine is the end of a journal excerpt, which is where the reason is.
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")

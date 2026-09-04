@@ -140,6 +140,10 @@ func createOptions(cfg config.Config) (provider.CreateOptions, error) {
 		Size:      cfg.Size,
 		Image:     cfg.Image,
 		SSHKeyIDs: cfg.SSHKeyIDs,
+		// Always. A client tries IPv6 first for anything dual stack, and a
+		// server without it turns every one of those attempts into a round
+		// trip that ends in a refusal.
+		IPv6: true,
 	}, nil
 }
 

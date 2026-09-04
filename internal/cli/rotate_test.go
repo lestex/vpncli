@@ -96,7 +96,7 @@ func TestRotate(t *testing.T) {
 		t.Error("the replacement reuses the old REALITY keypair")
 	}
 
-	if !strings.Contains(out, "vpncli connect") {
+	if !strings.Contains(out, "vpncli server connect") {
 		t.Errorf("nothing says clients have to be reconfigured:\n%s", out)
 	}
 }

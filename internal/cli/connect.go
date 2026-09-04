@@ -28,7 +28,7 @@ func newConnectCommand() *cobra.Command {
 By default it prints the ` + "`vless://`" + ` link that every current client imports,
 one line and nothing else, so it can be piped somewhere useful:
 
-    vpncli connect 3 | pbcopy
+    vpncli server connect 3 | pbcopy
 
 ` + "`--qr`" + ` draws the same link as a QR code, which is how it gets onto a phone
 without going through anything that keeps a copy.
@@ -48,7 +48,7 @@ your server, and the command then says exactly how to run it. Redirecting with
 that no longer describes it - which is a confusing way to find out that
 nothing is being tunneled.
 
-    vpncli connect 3 --tun -o ~/vpn.json
+    vpncli server connect 3 --tun -o ~/vpn.json
 
 No API call and no SSH: everything here was recorded when the server was
 bootstrapped, so this works offline and needs no token.`,
@@ -113,7 +113,7 @@ func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bo
 	}
 
 	if !asQR {
-		// Alone on stdout, so `vpncli connect 3 | pbcopy` copies a link and
+		// Alone on stdout, so `vpncli server connect 3 | pbcopy` copies a link and
 		// not a paragraph about one.
 		_, err := fmt.Fprintln(out, uri)
 		return err

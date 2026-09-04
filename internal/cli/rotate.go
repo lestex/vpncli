@@ -140,7 +140,7 @@ func runRotate(ctx context.Context, in io.Reader, out io.Writer, open openFunc, 
 
 	fmt.Fprintf(out, "\nServing VLESS+REALITY on %s:%d, camouflaged as %s.\n",
 		replacement.IPv4, bootstrap.Port, replacement.Credentials.ServerName)
-	fmt.Fprintf(out, "Its address and keys are new, so every client needs `vpncli connect %d` again.\n",
+	fmt.Fprintf(out, "Its address and keys are new, so every client needs `vpncli server connect %d` again.\n",
 		replacement.ID)
 	return nil
 }

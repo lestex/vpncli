@@ -8,7 +8,7 @@ configured with VLESS+REALITY (Xray-core).
 One static Go binary. No Terraform, no domain, no CDN.
 
 > **Status: v1.0.0 - the whole workflow.** `vpncli server provision` creates and
-> configures a server, `vpncli connect` builds the client config to reach it
+> configures a server, `vpncli server connect` builds the client config to reach it
 > with, and `vpncli server rotate` replaces it with a fresh one that shares nothing
 > with it. See [Roadmap](#roadmap).
 
@@ -318,7 +318,7 @@ accepted as a confirmation - not even `y`.
 Connect to it:
 
 ```sh
-vpncli connect 3
+vpncli server connect 3
 ```
 
 ```
@@ -328,21 +328,21 @@ vless://1e089a02-...@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&fp=c
 The link is the whole output, so it pipes:
 
 ```sh
-vpncli connect 3 | pbcopy
+vpncli server connect 3 | pbcopy
 ```
 
 For a phone, `--qr` draws the same link in the terminal, which gets it across
 without going through anything that keeps a copy:
 
 ```sh
-vpncli connect 3 --qr
+vpncli server connect 3 --qr
 ```
 
 For a desktop, `--sing-box` writes a sing-box config instead - a SOCKS and HTTP
 proxy on `127.0.0.1:1080`, which needs no privileges:
 
 ```sh
-vpncli connect 3 --sing-box -o ~/vpn.json
+vpncli server connect 3 --sing-box -o ~/vpn.json
 sing-box run -c ~/vpn.json
 ```
 
@@ -357,7 +357,7 @@ included, and DNS with them. Creating an interface and rewriting the routing
 table needs root:
 
 ```sh
-vpncli connect 3 --tun -o ~/vpn.json
+vpncli server connect 3 --tun -o ~/vpn.json
 sudo sing-box run -c ~/vpn.json
 ```
 
@@ -398,7 +398,7 @@ ID  NAME                REGION  SIZE         IMAGE             IPV4          STA
 4   vpncli-ams3-7d3a91  ams3    s-1vcpu-1gb  ubuntu-24-04-x64  203.0.113.44  active  just now
 
 Serving VLESS+REALITY on 203.0.113.44:443, camouflaged as www.samsung.com.
-Its address and keys are new, so every client needs `vpncli connect 4` again.
+Its address and keys are new, so every client needs `vpncli server connect 4` again.
 ```
 
 This is the workflow the whole program is shaped around. The replacement
@@ -421,14 +421,14 @@ vpncli server provision     create a server and configure it
 vpncli server bootstrap 3   configure one that is not configured yet
 vpncli server rotate 3      replace one with a fresh server
 vpncli server destroy 3     delete one and forget it
-vpncli connect 3            the link, QR or client config to reach one
+vpncli server connect 3     the link, QR or client config to reach one
 vpncli sync                 reconcile local state against the provider
 vpncli providers do list    every droplet in the account, from the API
 ```
 
-Everything about a server's existence is grouped under `server`. What is left
-at the top level is using one, and the two commands that talk to a provider
-about the whole account.
+Everything that acts on a server is grouped under `server`. What is left at the
+top level is what is not about a particular server: the wizard, reconciling
+state, and asking a provider about the whole account.
 
 ## Files
 
@@ -512,7 +512,7 @@ locally, so packaging can be rehearsed before the tag goes out.
 ## Clients
 
 Servers are standard VLESS+REALITY, so any current client works, and
-`vpncli connect` speaks the two formats between them cover everything. On iOS,
+`vpncli server connect` speaks the two formats between them cover everything. On iOS,
 Shadowrocket (paid, most mature REALITY support) and Streisand (free, open
 source) both import from a `vless://` URI or QR code with no server-side
 accommodation. On a desktop, sing-box takes the generated config directly.

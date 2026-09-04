@@ -128,7 +128,7 @@ func TestServerName(t *testing.T) {
 
 func TestProvisionHelpSaysWhatItDoesNotDoYet(t *testing.T) {
 	out := run(t, "server", "provision", "--help")
-	for _, want := range []string{"vpncli init", "vpncli destroy", "Xray-core"} {
+	for _, want := range []string{"vpncli init", "vpncli server destroy", "Xray-core"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("provision help does not mention %q:\n%s", want, out)
 		}
@@ -203,7 +203,7 @@ func TestProvisionNamesTheServerWhenTheWaitFails(t *testing.T) {
 		t.Fatalf("got %v, want the wait error", err)
 	}
 
-	if !strings.Contains(out, "vpncli destroy") {
+	if !strings.Contains(out, "vpncli server destroy") {
 		t.Errorf("a created server is left unaccounted for:\n%s", out)
 	}
 
@@ -221,7 +221,7 @@ func TestProvisionRecordsNothingWhenCreateFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "422") {
 		t.Fatalf("got %v, want the create error", err)
 	}
-	if strings.Contains(out, "vpncli destroy") {
+	if strings.Contains(out, "vpncli server destroy") {
 		t.Errorf("a server that was never created was reported as billable:\n%s", out)
 	}
 	if servers := storedServers(t); len(servers) != 0 {

@@ -9,7 +9,7 @@ One static Go binary. No Terraform, no domain, no CDN.
 
 > **Status: v1.0.0 - the whole workflow.** `vpncli server provision` creates and
 > configures a server, `vpncli connect` builds the client config to reach it
-> with, and `vpncli rotate` replaces it with a fresh one that shares nothing
+> with, and `vpncli server rotate` replaces it with a fresh one that shares nothing
 > with it. See [Roadmap](#roadmap).
 
 ## Why it is built this way
@@ -247,7 +247,7 @@ nothing, and neither does a terminal that says it is `dumb`.
 The row is written as soon as the provider accepts the request, before the wait
 for the server to boot. That ordering is deliberate: a server that exists but is
 in nobody's state file is invisible and still billed, so an interrupted wait
-leaves something `vpncli destroy` can clean up, and `vpncli sync` finds it from
+leaves something `vpncli server destroy` can clean up, and `vpncli sync` finds it from
 any machine.
 
 ### What the bootstrap does
@@ -301,7 +301,7 @@ locally until the server is actually serving.
 Destroy one:
 
 ```sh
-vpncli destroy 3
+vpncli server destroy 3
 ```
 
 ```
@@ -383,7 +383,7 @@ which one you picked.
 Replace a server with a fresh one:
 
 ```sh
-vpncli rotate 3
+vpncli server rotate 3
 ```
 
 ```
@@ -419,15 +419,16 @@ vpncli init                 interactive wizard, writes config.yaml
 vpncli server list          what local state knows about
 vpncli server provision     create a server and configure it
 vpncli server bootstrap 3   configure one that is not configured yet
+vpncli server rotate 3      replace one with a fresh server
+vpncli server destroy 3     delete one and forget it
 vpncli connect 3            the link, QR or client config to reach one
-vpncli rotate 3             replace one with a fresh server
-vpncli destroy 3            delete one and forget it
 vpncli sync                 reconcile local state against the provider
 vpncli providers do list    every droplet in the account, from the API
 ```
 
-Making servers is grouped under `server`; the rest act on one server you
-already have, or on the whole account.
+Everything about a server's existence is grouped under `server`. What is left
+at the top level is using one, and the two commands that talk to a provider
+about the whole account.
 
 ## Files
 

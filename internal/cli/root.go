@@ -23,10 +23,8 @@ time.`,
 
 	root.AddCommand(
 		newConnectCommand(),
-		newDestroyCommand(),
 		newInitCommand(),
 		newProvidersCommand(),
-		newRotateCommand(),
 		newServerCommand(),
 		newSyncCommand(),
 		newVersionCommand(),

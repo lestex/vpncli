@@ -26,7 +26,7 @@ func newProvisionCommand() *cobra.Command {
 
 The row is recorded as soon as the provider accepts the request, before the
 wait: a server that exists but is not in state is invisible and still billed.
-So an interrupted wait leaves something ` + "`vpncli destroy`" + ` can clean up, and
+So an interrupted wait leaves something ` + "`vpncli server destroy`" + ` can clean up, and
 ` + "`vpncli sync`" + ` picks it up on any machine.
 
 The server comes up as a stock OS image with the configured SSH key installed.
@@ -78,7 +78,7 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc, dial dialFu
 		// id is how it gets cleaned up, and saying so here is cheaper than
 		// finding out from a bill.
 		if srv.ID != 0 {
-			fmt.Fprintf(out, "the server was created and recorded as id %d: `vpncli destroy %d` removes it\n", srv.ID, srv.ID)
+			fmt.Fprintf(out, "the server was created and recorded as id %d: `vpncli server destroy %d` removes it\n", srv.ID, srv.ID)
 		}
 		return err
 	}

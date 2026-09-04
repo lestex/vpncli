@@ -126,7 +126,7 @@ func (m *Manager) Sync(ctx context.Context) (SyncResult, error) {
 // The row is written as soon as the provider accepts the request and before
 // the wait begins. A server that exists but is not in state is invisible and
 // still billed, so the ordering is deliberate: if the wait is interrupted, the
-// returned server still names something `vpncli destroy` can clean up.
+// returned server still names something `vpncli server destroy` can clean up.
 func (m *Manager) Provision(ctx context.Context, opts provider.CreateOptions) (state.Server, error) {
 	// Tagging is what makes a server ours as far as Sync is concerned, so it
 	// is applied here rather than trusted to the caller.

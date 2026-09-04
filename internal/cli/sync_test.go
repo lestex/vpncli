@@ -143,7 +143,7 @@ func TestOpenProvider(t *testing.T) {
 }
 
 // The sync help should tell the user which servers it will and will not touch,
-// since adopting the wrong one would put it under `vpncli destroy`.
+// since adopting the wrong one would put it under `vpncli server destroy`.
 func TestSyncHelpExplainsTagging(t *testing.T) {
 	out := run(t, "sync", "--help")
 	for _, want := range []string{provider.ManagedTag, "adopted", "tag"} {

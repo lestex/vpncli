@@ -47,16 +47,16 @@ func rotatable(t *testing.T) (*fakeProvider, *fakeSSH) {
 }
 
 func TestRotateIsRegistered(t *testing.T) {
-	out := run(t, "--help")
+	out := run(t, "server", "--help")
 	if !strings.Contains(out, "rotate") {
-		t.Errorf("rotate is missing from root help:\n%s", out)
+		t.Errorf("rotate is missing from `vpncli server` help:\n%s", out)
 	}
 }
 
 func TestRotateNeedsExactlyOneID(t *testing.T) {
 	withStateDir(t)
 
-	for _, args := range [][]string{{"rotate"}, {"rotate", "1", "2"}} {
+	for _, args := range [][]string{{"server", "rotate"}, {"server", "rotate", "1", "2"}} {
 		if _, err := execute(args...); err == nil {
 			t.Errorf("%v was accepted, want an error", args)
 		}
@@ -120,7 +120,7 @@ func TestRotateKeepsTheOldServerWhenTheReplacementFails(t *testing.T) {
 		t.Errorf("nothing says the old server is still there:\n%s", out)
 	}
 	// The half-built replacement is billing, so its id has to be said.
-	if !strings.Contains(out, "vpncli destroy") {
+	if !strings.Contains(out, "vpncli server destroy") {
 		t.Errorf("the replacement is left unaccounted for:\n%s", out)
 	}
 
@@ -225,7 +225,7 @@ func TestRotateUnknownServer(t *testing.T) {
 }
 
 func TestRotateHelpExplainsTheOrder(t *testing.T) {
-	out := run(t, "rotate", "--help")
+	out := run(t, "server", "rotate", "--help")
 	for _, want := range []string{"destroy", "new local id", "current config"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rotate help does not mention %q:\n%s", want, out)

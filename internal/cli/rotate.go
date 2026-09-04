@@ -116,7 +116,7 @@ func runRotate(ctx context.Context, in io.Reader, out io.Writer, open openFunc, 
 		// with; nothing is destroyed.
 		fmt.Fprintf(out, "%s is untouched and still serving.\n", old.Name)
 		if replacement.ID != 0 {
-			fmt.Fprintf(out, "The replacement is id %d: `vpncli server bootstrap %d` tries again, `vpncli destroy %d` gives up on it.\n",
+			fmt.Fprintf(out, "The replacement is id %d: `vpncli server bootstrap %d` tries again, `vpncli server destroy %d` gives up on it.\n",
 				replacement.ID, replacement.ID, replacement.ID)
 		}
 		return err

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lestex/vpncli/internal/config"
 	"github.com/lestex/vpncli/internal/prompt"
@@ -26,7 +27,43 @@ type fakeProvider struct {
 	regions []provider.Region
 	sizes   []provider.Size
 	images  []provider.Image
+	sshKeys []provider.SSHKey
 	err     error
+
+	// The create path, which only the provision and destroy tests use.
+	created   provider.CreateOptions
+	createErr error
+	ready     provider.VPSInstance
+	readyErr  error
+	deleted   []string
+	deleteErr error
+}
+
+func (f *fakeProvider) CreateInstance(_ context.Context, opts provider.CreateOptions) (provider.VPSInstance, error) {
+	f.created = opts
+	if f.createErr != nil {
+		return provider.VPSInstance{}, f.createErr
+	}
+	return provider.VPSInstance{
+		ID:        "1001",
+		Name:      opts.Name,
+		Provider:  f.Name(),
+		Region:    opts.Region,
+		Size:      opts.Size,
+		Image:     opts.Image,
+		Status:    provider.StatusProvisioning,
+		CreatedAt: time.Now().UTC(),
+		Tags:      opts.Tags,
+	}, nil
+}
+
+func (f *fakeProvider) WaitReady(context.Context, string) (provider.VPSInstance, error) {
+	return f.ready, f.readyErr
+}
+
+func (f *fakeProvider) DeleteInstance(_ context.Context, id string) error {
+	f.deleted = append(f.deleted, id)
+	return f.deleteErr
 }
 
 func (f *fakeProvider) Name() string { return digitalocean.Name }
@@ -41,6 +78,10 @@ func (f *fakeProvider) ListSizes(context.Context) ([]provider.Size, error) {
 
 func (f *fakeProvider) ListImages(context.Context) ([]provider.Image, error) {
 	return f.images, f.err
+}
+
+func (f *fakeProvider) ListSSHKeys(context.Context) ([]provider.SSHKey, error) {
+	return f.sshKeys, f.err
 }
 
 func testRegions() []provider.Region {
@@ -72,9 +113,21 @@ func testImages() []provider.Image {
 	}
 }
 
+func testSSHKeys() []provider.SSHKey {
+	return []provider.SSHKey{
+		{ID: "11", Name: "laptop", Fingerprint: "aa:bb:cc"},
+		{ID: "22", Name: "workstation", Fingerprint: "dd:ee:ff"},
+	}
+}
+
 // testProvider answers every catalog lookup the wizard makes.
 func testProvider() *fakeProvider {
-	return &fakeProvider{regions: testRegions(), sizes: testSizes(), images: testImages()}
+	return &fakeProvider{
+		regions: testRegions(),
+		sizes:   testSizes(),
+		images:  testImages(),
+		sshKeys: testSSHKeys(),
+	}
 }
 
 // wizard runs the wizard against scripted answers and a fake provider, with
@@ -153,7 +206,7 @@ func TestInitRequiresToken(t *testing.T) {
 }
 
 func TestInitWritesTheAnswers(t *testing.T) {
-	out, err := wizard(t, testProvider(), "2\n2\n3\n")
+	out, err := wizard(t, testProvider(), "2\n2\n3\n2\n2\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -171,6 +224,12 @@ func TestInitWritesTheAnswers(t *testing.T) {
 	if cfg.Image != "debian-13-x64" {
 		t.Errorf("image = %q, want debian-13-x64", cfg.Image)
 	}
+	if !slices.Equal(cfg.SSHKeyIDs, []string{"22"}) {
+		t.Errorf("ssh keys = %v, want the second one offered", cfg.SSHKeyIDs)
+	}
+	if want := camouflageSites[1].Key; cfg.Reality.Host() != want {
+		t.Errorf("camouflage = %q, want %q", cfg.Reality.Host(), want)
+	}
 
 	path, _ := config.Path()
 	if !strings.Contains(out, path) {
@@ -179,7 +238,7 @@ func TestInitWritesTheAnswers(t *testing.T) {
 }
 
 func TestInitAcceptsSlugs(t *testing.T) {
-	if _, err := wizard(t, testProvider(), "ams3\ns-2vcpu-4gb\ndebian-12-x64\n"); err != nil {
+	if _, err := wizard(t, testProvider(), "ams3\ns-2vcpu-4gb\ndebian-12-x64\n\n\n"); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -192,7 +251,7 @@ func TestInitAcceptsSlugs(t *testing.T) {
 // Enter through the wizard and the result should be a server worth having:
 // the cheapest size in the chosen region, running the newest Ubuntu.
 func TestInitDefaultsToCheapestAndNewestUbuntu(t *testing.T) {
-	if _, err := wizard(t, testProvider(), "fra1\n\n\n"); err != nil {
+	if _, err := wizard(t, testProvider(), "fra1\n\n\n\n\n"); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -209,7 +268,7 @@ func TestInitDefaultsToCheapestAndNewestUbuntu(t *testing.T) {
 // neither is one the account cannot create at all.
 func TestInitOffersOnlySizesTheRegionHas(t *testing.T) {
 	// The size only ams3 has is typed anyway, and has to be turned down.
-	out, err := wizard(t, testProvider(), "fra1\ns-2vcpu-4gb\n2\n\n")
+	out, err := wizard(t, testProvider(), "fra1\ns-2vcpu-4gb\n2\n\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -244,7 +303,7 @@ func TestInitCapsTheSizeMenu(t *testing.T) {
 		})
 	}
 
-	out, err := wizard(t, vps, "fra1\n\n\n")
+	out, err := wizard(t, vps, "fra1\n\n\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -287,7 +346,7 @@ func TestInitKeepsAConfiguredSizeOnTheMenu(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := runInit(context.Background(), strings.NewReader("\n\n\n"), &out,
+	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n"), &out,
 		func(config.Config) (provider.VPSProvider, error) { return vps, nil })
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
@@ -304,7 +363,7 @@ func TestInitKeepsAConfiguredSizeOnTheMenu(t *testing.T) {
 // The bootstrap is apt, nginx, ufw and a sysctl. An image it cannot configure
 // would only produce a server that never gets finished.
 func TestInitOffersOnlySupportedDistributions(t *testing.T) {
-	out, err := wizard(t, testProvider(), "fra1\n\nfedora-42-x64\n1\n")
+	out, err := wizard(t, testProvider(), "fra1\n\nfedora-42-x64\n1\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -319,7 +378,7 @@ func TestInitOffersOnlySupportedDistributions(t *testing.T) {
 
 // Ubuntu is what the bootstrap is developed against, so it leads.
 func TestInitOrdersImagesByDistribution(t *testing.T) {
-	_, out, err := wizardOutput(t, testProvider(), "fra1\n\n\n")
+	_, out, err := wizardOutput(t, testProvider(), "fra1\n\n\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -388,7 +447,7 @@ func TestDescribeSize(t *testing.T) {
 // An unavailable region cannot take a droplet, so choosing it would only
 // produce a config that fails later.
 func TestInitSkipsUnavailableRegions(t *testing.T) {
-	out, err := wizard(t, testProvider(), "sfo1\n2\n\n\n")
+	out, err := wizard(t, testProvider(), "sfo1\n2\n\n\n\n\n")
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
@@ -432,21 +491,22 @@ func TestInitKeepsExistingSettings(t *testing.T) {
 		Region:     "fra1",
 		Size:       "s-1vcpu-1gb",
 		Image:      "ubuntu-22-04-x64",
+		SSHKeyIDs:  []string{"22"},
 		SSHKeyPath: "~/.ssh/id_ed25519",
-		Reality:    config.Reality{Dest: "www.cloudflare.com:443"},
+		Reality:    config.Camouflage("www.cloudflare.com"),
 	}
 	if err := existing.Save(); err != nil {
 		t.Fatalf("seeding config: %v", err)
 	}
 
 	var out bytes.Buffer
-	err := runInit(context.Background(), strings.NewReader("\n\n\n"), &out,
+	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n"), &out,
 		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
 	if err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
-	for _, want := range []string{"[fra1]", "[s-1vcpu-1gb]", "[ubuntu-22-04-x64]"} {
+	for _, want := range []string{"[fra1]", "[s-1vcpu-1gb]", "[ubuntu-22-04-x64]", "[workstation]", "[www.cloudflare.com]"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("the current value %s is not offered as the default:\n%s", want, out.String())
 		}
@@ -456,8 +516,11 @@ func TestInitKeepsExistingSettings(t *testing.T) {
 	if got.Region != existing.Region || got.Size != existing.Size || got.Image != existing.Image {
 		t.Errorf("got %+v, want the defaults kept: %+v", got, existing)
 	}
-	if got.SSHKeyPath != existing.SSHKeyPath || got.Reality.Dest != existing.Reality.Dest {
-		t.Errorf("unasked settings were dropped: %+v", got)
+	if !slices.Equal(got.SSHKeyIDs, existing.SSHKeyIDs) || got.Reality.Dest != existing.Reality.Dest {
+		t.Errorf("got %+v, want the defaults kept: %+v", got, existing)
+	}
+	if got.SSHKeyPath != existing.SSHKeyPath {
+		t.Errorf("an unasked setting was dropped: %+v", got)
 	}
 }
 
@@ -477,10 +540,163 @@ func TestInitAbandonedWritesNothing(t *testing.T) {
 	}
 }
 
+// The key is offered by name: an account holds several and the IDs say
+// nothing about which laptop they came from.
+func TestInitOffersSSHKeysByName(t *testing.T) {
+	out, err := wizard(t, testProvider(), "fra1\n\n\nlaptop\n\n")
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	if !strings.Contains(out, "laptop") || !strings.Contains(out, "aa:bb:cc") {
+		t.Errorf("the key menu names neither the key nor its fingerprint:\n%s", out)
+	}
+	if got := savedConfig(t).SSHKeyIDs; !slices.Equal(got, []string{"11"}) {
+		t.Errorf("ssh keys = %v, want the id of the key answered by name", got)
+	}
+}
+
+// A server created with no key arrives with a mailed root password, which no
+// bootstrap can use. That is a dead end worth naming before anything is built.
+func TestInitWithNoSSHKeys(t *testing.T) {
+	vps := testProvider()
+	vps.sshKeys = nil
+
+	_, err := wizard(t, vps, "fra1\n\n\n")
+	if err == nil || !strings.Contains(err.Error(), "no SSH keys") {
+		t.Fatalf("got %v, want an error naming what is missing", err)
+	}
+}
+
+// A hand-written list of several keys is a deliberate thing. Answering with
+// one of them is not a request to drop the rest.
+func TestInitKeepsEveryConfiguredSSHKey(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	existing := config.Config{Provider: digitalocean.Name, Region: "fra1", SSHKeyIDs: []string{"11", "22"}}
+	if err := existing.Save(); err != nil {
+		t.Fatalf("seeding config: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n"), &out,
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	if got := savedConfig(t).SSHKeyIDs; !slices.Equal(got, []string{"11", "22"}) {
+		t.Errorf("ssh keys = %v, want both kept", got)
+	}
+}
+
+// The camouflage answer has to reach the config as both halves REALITY needs:
+// somewhere to forward to, and the name a client is allowed to present.
+func TestInitWritesCamouflageAsDestAndSNI(t *testing.T) {
+	if _, err := wizard(t, testProvider(), "fra1\n\n\n\nwww.apple.com\n"); err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	got := savedConfig(t).Reality
+	if got.Dest != "www.apple.com:443" {
+		t.Errorf("dest = %q, want the host on 443", got.Dest)
+	}
+	if !slices.Equal(got.ServerNames, []string{"www.apple.com"}) {
+		t.Errorf("server names = %v, want the chosen host", got.ServerNames)
+	}
+}
+
+// The offered sites suit a lot of people and nobody in particular, so a
+// hostname must be typeable.
+func TestInitAcceptsACustomCamouflageHost(t *testing.T) {
+	if _, err := wizard(t, testProvider(), "fra1\n\n\n\nother\nshop.example.de\n"); err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	if got := savedConfig(t).Reality.Host(); got != "shop.example.de" {
+		t.Errorf("camouflage = %q, want the typed host", got)
+	}
+}
+
+// A URL or an address written into server_names is an SNI value no client can
+// present, and the failure would only show up at connect time.
+func TestInitRejectsACamouflageThatIsNotAHostname(t *testing.T) {
+	out, err := wizard(t, testProvider(), "fra1\n\n\n\nother\nhttps://www.apple.com/\nwww.apple.com\n")
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	if !strings.Contains(out, "is a URL") {
+		t.Errorf("a URL was taken as a hostname:\n%s", out)
+	}
+	if got := savedConfig(t).Reality.Host(); got != "www.apple.com" {
+		t.Errorf("camouflage = %q, want the second answer", got)
+	}
+}
+
+func TestCamouflageHost(t *testing.T) {
+	tests := []struct {
+		answer string
+		want   string
+		reason string
+	}{
+		{answer: "www.apple.com", want: "www.apple.com"},
+		{answer: "  www.apple.com  ", want: "www.apple.com"},
+		// A trailing dot is a valid FQDN and a broken SNI value.
+		{answer: "www.apple.com.", want: "www.apple.com"},
+		{answer: "https://www.apple.com/", reason: "is a URL"},
+		{answer: "www.apple.com:443", reason: "carries a port"},
+		{answer: "localhost", reason: "not a hostname"},
+		{answer: "93.184.216.34", reason: "is an address"},
+		{answer: "2606:2800:220:1:248:1893:25c8:1946", reason: "is an address"},
+	}
+
+	for _, tt := range tests {
+		got, err := camouflageHost(tt.answer)
+		if tt.reason != "" {
+			if err == nil || !strings.Contains(err.Error(), tt.reason) {
+				t.Errorf("camouflageHost(%q) = %q, %v; want an error saying %q", tt.answer, got, err, tt.reason)
+			}
+			continue
+		}
+		if err != nil || got != tt.want {
+			t.Errorf("camouflageHost(%q) = %q, %v; want %q", tt.answer, got, err, tt.want)
+		}
+	}
+}
+
+// A site chosen deliberately is not one of ours to replace.
+func TestInitKeepsAConfiguredCamouflageOnTheMenu(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	existing := config.Config{
+		Provider: digitalocean.Name,
+		Region:   "fra1",
+		Reality:  config.Camouflage("shop.example.de"),
+	}
+	if err := existing.Save(); err != nil {
+		t.Fatalf("seeding config: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := runInit(context.Background(), strings.NewReader("\n\n\n\n\n"), &out,
+		func(config.Config) (provider.VPSProvider, error) { return testProvider(), nil })
+	if err != nil {
+		t.Fatalf("runInit: %v", err)
+	}
+
+	if !slices.Contains(offered(out.String()), "shop.example.de") {
+		t.Errorf("the configured site fell off the menu:\n%s", out.String())
+	}
+	if got := savedConfig(t).Reality.Host(); got != "shop.example.de" {
+		t.Errorf("camouflage = %q, want the configured site", got)
+	}
+}
+
 // Provisioning needs a region, so the wizard has to say what it is for.
 func TestInitHelpNamesWhatItAsks(t *testing.T) {
 	out := run(t, "init", "--help")
-	for _, want := range []string{"region", "size", "image", "config.yaml", "DIGITALOCEAN_TOKEN"} {
+	for _, want := range []string{"region", "size", "image", "SSH key", "camouflage", "config.yaml", "DIGITALOCEAN_TOKEN"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("init help does not mention %q:\n%s", want, out)
 		}

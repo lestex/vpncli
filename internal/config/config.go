@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -16,9 +17,9 @@ import (
 const AppName = "vpncli"
 
 // Config is the persisted user configuration. Every field is optional: the
-// wizard fills it in over several versions - provider, region, size and image
-// are asked today, REALITY and the SSH key next - so a partially complete file
-// is normal and must not be an error.
+// wizard fills it in over several versions, so a partially complete file is
+// normal and must not be an error. What `vpncli provision` needs of it is
+// checked at provision time, where the message can name the missing answer.
 type Config struct {
 	// Provider is the provider slug, e.g. "digitalocean".
 	Provider string `yaml:"provider,omitempty"`
@@ -26,6 +27,11 @@ type Config struct {
 	Region string `yaml:"region,omitempty"`
 	Size   string `yaml:"size,omitempty"`
 	Image  string `yaml:"image,omitempty"`
+
+	// SSHKeyIDs are provider-side identifiers of the public keys installed for
+	// root on a new server. Without one the provider mails a root password
+	// instead, which no bootstrap can use.
+	SSHKeyIDs []string `yaml:"ssh_key_ids,omitempty"`
 
 	// SSHKeyPath is the private key used to bootstrap the server.
 	SSHKeyPath string `yaml:"ssh_key_path,omitempty"`
@@ -46,6 +52,32 @@ type Reality struct {
 	Dest string `yaml:"dest,omitempty"`
 	// ServerNames is the SNI list clients may present; it must match Dest.
 	ServerNames []string `yaml:"server_names,omitempty"`
+}
+
+// RealityPort is the port a camouflage site is impersonated on. A handshake
+// has to be indistinguishable from a real visit to that site, and real visits
+// go to 443.
+const RealityPort = "443"
+
+// Camouflage returns the Reality settings for impersonating one host.
+func Camouflage(host string) Reality {
+	return Reality{
+		Dest:        net.JoinHostPort(host, RealityPort),
+		ServerNames: []string{host},
+	}
+}
+
+// Host returns the camouflage host without its port, or "" if none is set. The
+// wizard offers it back as the default, so a re-run does not silently move a
+// deliberately chosen site.
+func (r Reality) Host() string {
+	if r.Dest == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(r.Dest); err == nil {
+		return host
+	}
+	return r.Dest
 }
 
 // Path returns the config file location: $XDG_CONFIG_HOME/vpncli/config.yaml,

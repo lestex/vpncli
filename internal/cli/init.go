@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"slices"
 	"strings"
 
@@ -26,14 +27,14 @@ func newInitCommand() *cobra.Command {
 		Short: "Configure vpncli interactively",
 		Long: `Ask what servers should be created, and write the answers to config.yaml.
 
-Provider, region, size and image are what it asks today. REALITY camouflage
-joins the wizard in the next version.
+Provider, region, size, image, SSH key and REALITY camouflage - which together
+are everything ` + "`vpncli provision`" + ` needs.
 
 Re-running it is safe: every question is offered with the current value as the
 default, and settings it does not ask about are left as they are.
 
-Listing regions is an API call, so DIGITALOCEAN_TOKEN or
-DIGITALOCEAN_ACCESS_TOKEN must be set.`,
+The menus are API calls, so DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN
+must be set.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runInit(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), openProvider)
@@ -96,17 +97,32 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) er
 	}
 	cfg.Image = image
 
+	keys, keyName, err := selectSSHKeys(ctx, p, vps, cfg.SSHKeyIDs)
+	if err != nil {
+		return err
+	}
+	cfg.SSHKeyIDs = keys
+
+	// Camouflage is the one question with no API behind it, so it is asked
+	// last: everything that can fail on a token has already failed by here.
+	host, err := selectCamouflage(p, cfg.Reality.Host())
+	if err != nil {
+		return err
+	}
+	cfg.Reality = config.Camouflage(host)
+
 	if err := cfg.Save(); err != nil {
 		return err
 	}
 
 	p.Printf("\nWrote %s\n", path)
-	p.Printf("  provider  %s\n", cfg.Provider)
-	p.Printf("  region    %s\n", cfg.Region)
-	p.Printf("  size      %s\n", cfg.Size)
-	p.Printf("  image     %s\n", cfg.Image)
-	p.Printf("\nThat is everything a server needs except its camouflage, which the\n")
-	p.Printf("next version asks for and `vpncli provision` will use.\n")
+	p.Printf("  provider   %s\n", cfg.Provider)
+	p.Printf("  region     %s\n", cfg.Region)
+	p.Printf("  size       %s\n", cfg.Size)
+	p.Printf("  image      %s\n", cfg.Image)
+	p.Printf("  ssh key    %s\n", sshKeySummary(keyName, cfg.SSHKeyIDs))
+	p.Printf("  camouflage %s\n", cfg.Reality.Dest)
+	p.Printf("\nThat is everything a server needs. Create one with `vpncli provision`.\n")
 
 	return nil
 }
@@ -242,6 +258,142 @@ func selectImage(ctx context.Context, p *prompt.Prompter, vps provider.VPSProvid
 		return "", err
 	}
 	return options[i].Key, nil
+}
+
+// selectSSHKeys asks which registered key gets installed for root.
+//
+// One key is asked for and a list is stored, because that is what the create
+// call takes and a config edited by hand may well name several. An account
+// with no key is a dead end rather than a question, so it says how to fix it.
+func selectSSHKeys(ctx context.Context, p *prompt.Prompter, vps provider.VPSProvider, current []string) ([]string, string, error) {
+	p.Printf("\nFetching SSH keys...\n\n")
+
+	keys, err := vps.ListSSHKeys(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(keys) == 0 {
+		return nil, "", fmt.Errorf("%s has no SSH keys registered: add one first, or a new server arrives with a mailed root password and no way in", vps.Name())
+	}
+
+	// Keys are answered by name rather than by the provider-side id, which is
+	// a number nobody chose and nothing recognizes. The fingerprint is there to
+	// tell two keys of the same name apart.
+	options := make([]prompt.Option, 0, len(keys))
+	for _, key := range keys {
+		options = append(options, prompt.Option{Key: key.Name, Label: key.Fingerprint})
+	}
+
+	p.Printf("This is the key the bootstrap logs in with. Pick one whose private\n")
+	p.Printf("half is on this machine.\n\n")
+
+	i, err := p.Select("SSH key", options, defaultOf(configuredKeyName(keys, current), options))
+	if err != nil {
+		return nil, "", err
+	}
+	// Answering with a key that is already configured is not a request to drop
+	// the others a hand-written list may hold.
+	if slices.Contains(current, keys[i].ID) {
+		return current, keys[i].Name, nil
+	}
+	return []string{keys[i].ID}, keys[i].Name, nil
+}
+
+// sshKeySummary names what was written. The id is what the config holds and
+// the name is what was answered, so one key shows both; a list kept from an
+// existing config is only ids, since only one of them was named here.
+func sshKeySummary(name string, ids []string) string {
+	if len(ids) == 1 {
+		return fmt.Sprintf("%s (%s)", name, ids[0])
+	}
+	return strings.Join(ids, ", ")
+}
+
+// configuredKeyName is the name of the first configured key still registered,
+// which is what the question offers as its default. A key deleted at the
+// provider leaves the question without one rather than with a stale answer.
+func configuredKeyName(keys []provider.SSHKey, current []string) string {
+	for _, key := range keys {
+		if slices.Contains(current, key.ID) {
+			return key.Name
+		}
+	}
+	return ""
+}
+
+// camouflageSites are the sites offered as REALITY destinations. A good one
+// speaks TLS 1.3 with X25519 and HTTP/2, is hosted behind a large CDN so the
+// traffic joins a crowd, and is unremarkable to be seen talking to from
+// wherever the server lives.
+var camouflageSites = []prompt.Option{
+	{Key: "www.microsoft.com", Label: "large, CDN-fronted, boring to see in a log"},
+	{Key: "www.apple.com", Label: "same, and reached from everywhere"},
+	{Key: "www.samsung.com", Label: "widely mirrored, good outside the US"},
+	{Key: "dl.google.com", Label: "download endpoint, long connections look normal"},
+	{Key: "www.cloudflare.com", Label: "everywhere, though obviously a CDN"},
+}
+
+// customCamouflage is the escape hatch key. It is not a hostname, so it cannot
+// collide with one.
+const customCamouflage = "other"
+
+// selectCamouflage asks which site the server should look like.
+func selectCamouflage(p *prompt.Prompter, current string) (string, error) {
+	options := slices.Clone(camouflageSites)
+	// A host already configured stays on the menu even when it is not one of
+	// ours, so re-running the wizard cannot quietly replace a chosen site.
+	if current != "" && !slices.ContainsFunc(options, func(o prompt.Option) bool { return o.Key == current }) {
+		options = append(options, prompt.Option{Key: current, Label: "currently configured"})
+	}
+	options = append(options, prompt.Option{Key: customCamouflage, Label: "type a hostname"})
+
+	p.Printf("\nREALITY hides the server behind a real site: the handshake is that\n")
+	p.Printf("site's, so a probe sees only a visit to it. Best is somewhere near\n")
+	p.Printf("the server that nobody would think twice about.\n\n")
+
+	i, err := p.Select("Camouflage", options, defaultOf(current, options))
+	if err != nil {
+		return "", err
+	}
+	if options[i].Key != customCamouflage {
+		return options[i].Key, nil
+	}
+
+	for {
+		answer, err := p.Input("Hostname", current)
+		if err != nil {
+			return "", err
+		}
+
+		host, err := camouflageHost(answer)
+		if err != nil {
+			p.Printf("%v\n", err)
+			continue
+		}
+		return host, nil
+	}
+}
+
+// camouflageHost validates a typed hostname. It has to be a bare host: a URL
+// or a host:port would be written into the config as an SNI value that no
+// client can present.
+func camouflageHost(answer string) (string, error) {
+	host := strings.TrimSpace(answer)
+	host = strings.TrimSuffix(host, ".")
+
+	switch {
+	case strings.Contains(host, "/"):
+		return "", fmt.Errorf("%q is a URL: give just the hostname, like www.apple.com", answer)
+	// Addresses are caught before the port check, or an IPv6 literal would be
+	// turned down for the colons rather than for what is wrong with it.
+	case net.ParseIP(host) != nil:
+		return "", fmt.Errorf("%q is an address: REALITY needs a name a certificate is issued for", answer)
+	case strings.Contains(host, ":"):
+		return "", fmt.Errorf("%q carries a port: give just the hostname, %s is assumed", answer, config.RealityPort)
+	case !strings.Contains(host, "."):
+		return "", fmt.Errorf("%q is not a hostname: it needs a domain, like www.apple.com", answer)
+	}
+	return host, nil
 }
 
 // describeSize renders a size as what it costs and what that buys. The tabs

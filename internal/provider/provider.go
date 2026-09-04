@@ -97,6 +97,18 @@ type Image struct {
 	Distribution string
 }
 
+// SSHKey is a public key already uploaded to the provider account. vpncli does
+// not upload keys: a key the user has registered themselves is one they still
+// hold the private half of, which is the half the bootstrap needs.
+type SSHKey struct {
+	// ID is what goes into CreateOptions.SSHKeyIDs.
+	ID   string
+	Name string
+	// Fingerprint identifies the key across providers, and is what the wizard
+	// shows so the right one can be picked out of several.
+	Fingerprint string
+}
+
 // VPSProvider is the full contract. Each provider normalizes its own SDK's
 // quirks behind these methods - notably WaitReady, where Hetzner has native
 // async waiters while DigitalOcean, Vultr and Linode need manual polling. That
@@ -120,6 +132,7 @@ type VPSProvider interface {
 	ListRegions(ctx context.Context) ([]Region, error)
 	ListSizes(ctx context.Context) ([]Size, error)
 	ListImages(ctx context.Context) ([]Image, error)
+	ListSSHKeys(ctx context.Context) ([]SSHKey, error)
 }
 
 // ErrNotFound is returned by GetInstance and DeleteInstance when the provider

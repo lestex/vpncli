@@ -107,3 +107,20 @@ func TestListRejectsArgs(t *testing.T) {
 		t.Error("expected an error for an unexpected positional argument")
 	}
 }
+
+// storedServers reads back what a command left in the state database.
+func storedServers(t *testing.T) []state.Server {
+	t.Helper()
+
+	store, err := openStore()
+	if err != nil {
+		t.Fatalf("opening state: %v", err)
+	}
+	defer store.Close()
+
+	servers, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	return servers
+}

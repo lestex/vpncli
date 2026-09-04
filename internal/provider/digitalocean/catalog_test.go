@@ -113,6 +113,19 @@ func imagePages(pages ...[]godo.Image) *fakeImages {
 	return &fakeImages{pager: pager[godo.Image]{pages: pages}}
 }
 
+type fakeKeys struct {
+	godo.KeysService
+	pager[godo.Key]
+}
+
+func (f *fakeKeys) List(_ context.Context, opt *godo.ListOptions) ([]godo.Key, *godo.Response, error) {
+	return f.next(opt, "account/keys")
+}
+
+func keyPages(pages ...[]godo.Key) *fakeKeys {
+	return &fakeKeys{pager: pager[godo.Key]{pages: pages}}
+}
+
 func TestListRegions(t *testing.T) {
 	f := regionPages([]godo.Region{
 		{Slug: "fra1", Name: "Frankfurt 1", Available: true},
@@ -354,5 +367,36 @@ func TestCatalogErrorsNameTheLookup(t *testing.T) {
 				t.Errorf("error %q does not wrap the cause", err)
 			}
 		})
+	}
+}
+
+func TestListSSHKeys(t *testing.T) {
+	f := keyPages([]godo.Key{
+		{ID: 22, Name: "workstation", Fingerprint: "dd:ee:ff"},
+		{ID: 11, Name: "laptop", Fingerprint: "aa:bb:cc"},
+	})
+
+	got, err := catalogProvider(t, catalog{keys: f}).ListSSHKeys(context.Background())
+	if err != nil {
+		t.Fatalf("ListSSHKeys: %v", err)
+	}
+
+	// By name, because that is what the wizard offers them by, and the ID is a
+	// string because providers disagree on the type.
+	want := []provider.SSHKey{
+		{ID: "11", Name: "laptop", Fingerprint: "aa:bb:cc"},
+		{ID: "22", Name: "workstation", Fingerprint: "dd:ee:ff"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListSSHKeys() = %+v, want %+v", got, want)
+	}
+}
+
+// An account with no keys is a question the wizard has to answer, not an error
+// to report from here.
+func TestListSSHKeysEmpty(t *testing.T) {
+	got, err := catalogProvider(t, catalog{keys: keyPages()}).ListSSHKeys(context.Background())
+	if err != nil || len(got) != 0 {
+		t.Errorf("ListSSHKeys() = %+v, %v, want none", got, err)
 	}
 }

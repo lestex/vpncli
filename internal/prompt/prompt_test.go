@@ -154,3 +154,56 @@ func TestSelectWithNoOptions(t *testing.T) {
 		t.Fatal("expected an error when there is nothing to choose from")
 	}
 }
+
+// inputFrom runs one Input against scripted input.
+func inputFrom(t *testing.T, in, def string) (string, string, error) {
+	t.Helper()
+
+	var out strings.Builder
+	answer, err := New(strings.NewReader(in), &out).Input("Hostname", def)
+	return answer, out.String(), err
+}
+
+func TestInput(t *testing.T) {
+	got, _, err := inputFrom(t, "  www.apple.com  \n", "")
+	if err != nil {
+		t.Fatalf("Input: %v", err)
+	}
+	if got != "www.apple.com" {
+		t.Errorf("Input() = %q, want it trimmed", got)
+	}
+}
+
+func TestInputEmptyAnswerTakesTheDefault(t *testing.T) {
+	got, out, err := inputFrom(t, "\n", "www.apple.com")
+	if err != nil {
+		t.Fatalf("Input: %v", err)
+	}
+	if got != "www.apple.com" {
+		t.Errorf("Input() = %q, want the default", got)
+	}
+	if !strings.Contains(out, "[www.apple.com]") {
+		t.Errorf("prompt does not show the default:\n%s", out)
+	}
+}
+
+// With no default there is no answer to infer, so the question comes back.
+func TestInputWithNoDefaultReasks(t *testing.T) {
+	got, out, err := inputFrom(t, "\nwww.apple.com\n", "")
+	if err != nil {
+		t.Fatalf("Input: %v", err)
+	}
+	if got != "www.apple.com" {
+		t.Errorf("Input() = %q, want the second answer", got)
+	}
+	if strings.Count(out, "Hostname") != 2 {
+		t.Errorf("the question was not asked again:\n%s", out)
+	}
+}
+
+// Ctrl-D is not a blank answer, it is the end of the wizard.
+func TestInputAtEndOfInput(t *testing.T) {
+	if _, _, err := inputFrom(t, "", "www.apple.com"); !errors.Is(err, ErrNoInput) {
+		t.Errorf("got %v, want ErrNoInput", err)
+	}
+}

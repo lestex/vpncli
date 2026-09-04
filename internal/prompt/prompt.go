@@ -82,6 +82,40 @@ func (p *Prompter) Select(question string, options []Option, defaultKey string) 
 	}
 }
 
+// Input asks for a value typed out rather than picked off a list. An empty
+// answer takes def; with no def it re-asks, since a question worth asking has
+// no blank answer.
+//
+// Validation is the caller's: what makes an answer good differs per question,
+// and only the caller can say so in words worth printing.
+func (p *Prompter) Input(question, def string) (string, error) {
+	for {
+		if def != "" {
+			p.Printf("%s [%s]: ", question, def)
+		} else {
+			p.Printf("%s: ", question)
+		}
+
+		line, err := p.in.ReadString('\n')
+		answer := strings.TrimSpace(line)
+		switch {
+		case errors.Is(err, io.EOF) && answer == "":
+			p.Printf("\n")
+			return "", ErrNoInput
+		case err != nil && !errors.Is(err, io.EOF):
+			return "", fmt.Errorf("reading answer: %w", err)
+		}
+
+		if answer != "" {
+			return answer, nil
+		}
+		if def != "" {
+			return def, nil
+		}
+		p.Printf("An answer is needed here.\n")
+	}
+}
+
 // ask writes the prompt line and reads one answer, trimmed.
 func (p *Prompter) ask(question string, def int, options []Option) (string, error) {
 	if def >= 0 {

@@ -52,26 +52,40 @@ const (
 	decoyPath  = "/var/www/html/index.html"
 )
 
-// Run configures a server. The steps are ordered so that nothing is reachable
-// before it is ready: the firewall closes last, and Xray is only started once
-// its config is in place.
+// step is one thing the bootstrap does, and the name it is known by.
+type step struct {
+	what string
+	do   func(context.Context, Runner, Options) error
+}
+
+// steps are ordered so that nothing is reachable before it is ready: the
+// firewall closes last, and Xray is only started once its config is in place.
+var steps = []step{
+	{"installing packages", installPackages},
+	{"turning on BBR", enableBBR},
+	{"installing Xray-core " + XrayVersion, installXray},
+	{"writing the server config", writeConfig},
+	{"putting up the decoy site", installDecoy},
+	{"starting Xray", startXray},
+	{"closing the firewall", closeFirewall},
+	{"checking it came up", verify},
+}
+
+// Steps names what Run will do, in order, so a caller can show the whole list
+// before starting it. It is taken from the same table Run walks, which is what
+// keeps a displayed checklist from drifting out of step with the work.
+func Steps() []string {
+	names := make([]string, 0, len(steps))
+	for _, s := range steps {
+		names = append(names, s.what)
+	}
+	return names
+}
+
+// Run configures a server.
 func Run(ctx context.Context, c Runner, opts Options, progress Progress) error {
 	if progress == nil {
 		progress = func(string) {}
-	}
-
-	steps := []struct {
-		what string
-		do   func(context.Context, Runner, Options) error
-	}{
-		{"installing packages", installPackages},
-		{"turning on BBR", enableBBR},
-		{"installing Xray-core " + XrayVersion, installXray},
-		{"writing the server config", writeConfig},
-		{"putting up the decoy site", installDecoy},
-		{"starting Xray", startXray},
-		{"closing the firewall", closeFirewall},
-		{"checking it came up", verify},
 	}
 
 	for _, step := range steps {

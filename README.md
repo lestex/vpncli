@@ -227,11 +227,29 @@ vpncli server provision
 
 ```
 Creating vpncli-fra1-7d3a91 (s-1vcpu-1gb, fra1) on digitalocean...
-⠹ installing Xray-core v26.3.27 (1m48s)
+
+  ✓ installing packages
+  ✓ turning on BBR
+  ⠹ installing Xray-core v26.3.27 (48s)
+    writing the server config
+    putting up the decoy site
+    starting Xray
+    closing the firewall
+    checking it came up
 ```
 
 ```
 Creating vpncli-fra1-7d3a91 (s-1vcpu-1gb, fra1) on digitalocean...
+
+  ✓ installing packages
+  ✓ turning on BBR
+  ✓ installing Xray-core v26.3.27
+  ✓ writing the server config
+  ✓ putting up the decoy site
+  ✓ starting Xray
+  ✓ closing the firewall
+  ✓ checking it came up
+
 ready in 3m11s
 
 ID  NAME                REGION  SIZE         IMAGE             IPV4          STATUS  AGE
@@ -240,9 +258,14 @@ ID  NAME                REGION  SIZE         IMAGE             IPV4          STA
 Serving VLESS+REALITY on 203.0.113.10:443, camouflaged as www.apple.com.
 ```
 
-Creating takes about a minute and configuring another two, so the wait spins
-and says which step it is on. Redirected into a pipe or a file it draws
-nothing, and neither does a terminal that says it is `dumb`.
+Creating takes about a minute and configuring another two, so the steps are on
+screen and tick off as they finish, with a clock against whichever is running -
+a stall shows up as one step's time running away. A step that fails is marked
+and left there, so what went wrong stays on screen next to the error.
+
+Redirected into a pipe or a file, each step is printed once as it starts and
+nothing is redrawn, so a log reads as a plain list of what happened. A terminal
+that says it is `dumb` gets the same.
 
 The row is written as soon as the provider accepts the request, before the wait
 for the server to boot. That ordering is deliberate: a server that exists but is

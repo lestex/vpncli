@@ -415,3 +415,23 @@ func TestXrayIsRestartedNotJustEnabled(t *testing.T) {
 		t.Error("`enable --now` does nothing when the unit is already running")
 	}
 }
+
+// A caller showing the steps as a checklist has to be showing the steps that
+// actually run, so the list comes from the same table Run walks.
+func TestStepsMatchWhatRunDoes(t *testing.T) {
+	f := newFakeRunner()
+
+	var reported []string
+	if err := Run(context.Background(), f, testOptions(t), func(s string) {
+		reported = append(reported, s)
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !slices.Equal(Steps(), reported) {
+		t.Errorf("Steps() = %v, but Run reported %v", Steps(), reported)
+	}
+	if len(Steps()) == 0 {
+		t.Error("Steps() is empty")
+	}
+}

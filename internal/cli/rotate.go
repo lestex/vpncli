@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -105,11 +106,18 @@ func runRotate(ctx context.Context, in io.Reader, out io.Writer, open openFunc, 
 
 	spin := startSpinner(out, "waiting for the replacement to boot")
 	replacement, err := m.Provision(ctx, opts)
-	if err == nil {
-		spin.say("connecting")
-		err = bootstrapServer(ctx, store, cfg, replacement, dial, check, spin.say)
-	}
 	spin.stop()
+	booted := spin.elapsed()
+
+	var configured time.Duration
+	if err == nil {
+		fmt.Fprintln(out)
+		list := startChecklist(out, bootstrap.Steps())
+		err = bootstrapServer(ctx, store, cfg, replacement, dial, check, list.start)
+		list.stop(err)
+		configured = list.elapsed()
+		fmt.Fprintln(out)
+	}
 	if err != nil {
 		// The old server is still serving, which is the point of building the
 		// new one first. Whatever was created is named so it can be dealt
@@ -128,7 +136,7 @@ func runRotate(ctx context.Context, in io.Reader, out io.Writer, open openFunc, 
 		return fmt.Errorf("destroying %s: %w", old.Name, err)
 	}
 
-	fmt.Fprintf(out, "rotated in %s: %s is gone\n\n", took(spin.elapsed()), old.Name)
+	fmt.Fprintf(out, "rotated in %s: %s is gone\n\n", took(booted+configured), old.Name)
 
 	replacement, err = store.Get(ctx, replacement.ID)
 	if err != nil {

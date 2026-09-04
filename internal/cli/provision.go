@@ -72,6 +72,7 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc, dial dialFu
 	spin := startSpinner(out, "waiting for the server to boot")
 	srv, err := manager.New(vps, store).Provision(ctx, opts)
 	spin.stop()
+	booted := spin.elapsed()
 
 	if err != nil {
 		// A wait that failed still leaves a server running and recorded. Its
@@ -86,15 +87,16 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc, dial dialFu
 	// The server exists; now it has to be made into something worth having.
 	// Its row is already written, so a bootstrap that fails leaves a server
 	// `vpncli server bootstrap` can finish rather than one to throw away.
-	spin = startSpinner(out, "connecting")
-	err = bootstrapServer(ctx, store, cfg, srv, dial, check, spin.say)
-	spin.stop()
+	fmt.Fprintln(out)
+	list := startChecklist(out, bootstrap.Steps())
+	err = bootstrapServer(ctx, store, cfg, srv, dial, check, list.start)
+	list.stop(err)
 	if err != nil {
-		fmt.Fprintf(out, "the server is up but not configured: `vpncli server bootstrap %d` tries again\n", srv.ID)
+		fmt.Fprintf(out, "\nthe server is up but not configured: `vpncli server bootstrap %d` tries again\n", srv.ID)
 		return err
 	}
 
-	fmt.Fprintf(out, "ready in %s\n\n", took(spin.elapsed()))
+	fmt.Fprintf(out, "\nready in %s\n\n", took(booted+list.elapsed()))
 	if err := printServers(out, []state.Server{srv}); err != nil {
 		return err
 	}

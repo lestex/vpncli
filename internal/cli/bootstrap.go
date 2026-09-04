@@ -85,14 +85,15 @@ func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, chec
 
 	fmt.Fprintf(out, "Configuring %s (%s)...\n", srv.Name, srv.IPv4)
 
-	spin := startSpinner(out, "connecting")
-	err = bootstrapServer(ctx, store, cfg, srv, dial, check, spin.say)
-	spin.stop()
+	fmt.Fprintln(out)
+	list := startChecklist(out, bootstrap.Steps())
+	err = bootstrapServer(ctx, store, cfg, srv, dial, check, list.start)
+	list.stop(err)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "ready in %s\n", took(spin.elapsed()))
+	fmt.Fprintf(out, "\nready in %s\n", took(list.elapsed()))
 	fmt.Fprintf(out, "\n%s is serving VLESS+REALITY on %s:%d, camouflaged as %s.\n",
 		srv.Name, srv.IPv4, bootstrap.Port, cfg.Reality.Host())
 	fmt.Fprintf(out, "`vpncli server connect %d` prints the link to reach it with.\n", srv.ID)

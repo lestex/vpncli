@@ -32,31 +32,15 @@ type spinner struct {
 	interval time.Duration
 	started  time.Time
 
-	// mu guards message, which the caller changes as the work moves on while
-	// the drawing goroutine is reading it.
-	mu      sync.Mutex
+	// message does not change once the spinner is started. Work that goes
+	// through several named steps wants the checklist instead, which shows
+	// them all rather than replacing one line with the next.
 	message string
 
 	silent bool
 	once   sync.Once
 	quit   chan struct{}
 	done   chan struct{}
-}
-
-// say changes what the spinner is waiting for. A bootstrap runs to several
-// minutes and goes through a dozen steps, and which one it is on is the
-// difference between a wait and a stall.
-func (s *spinner) say(message string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.message = message
-}
-
-// saying is the current message.
-func (s *spinner) saying() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.message
 }
 
 // startSpinner begins animating message until the returned spinner is stopped.
@@ -105,7 +89,7 @@ func (s *spinner) run() {
 	defer ticker.Stop()
 
 	for i := 0; ; i++ {
-		fmt.Fprintf(s.out, "\r%s %s (%s)\x1b[K", spinnerFrames[i%len(spinnerFrames)], s.saying(), took(s.elapsed()))
+		fmt.Fprintf(s.out, "\r%s %s (%s)\x1b[K", spinnerFrames[i%len(spinnerFrames)], s.message, took(s.elapsed()))
 
 		select {
 		case <-s.quit:

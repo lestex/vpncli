@@ -7,11 +7,10 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v0.4.0 - state wired in.** `vpncli list` and `vpncli sync` work
-> against the local store, and creating and destroying servers now records
-> what it did. There is still no `provision` command to drive it: choosing a
-> region, size and image is the wizard's job, and that starts at v0.5.0. See
-> [Roadmap](#roadmap).
+> **Status: v0.5.0 - the wizard starts.** `vpncli init` asks for a provider and
+> a region and writes `config.yaml`. Size and image are the next two questions,
+> and once they are answered there is enough to give `provision` its arguments.
+> See [Roadmap](#roadmap).
 
 ## Why it is built this way
 
@@ -48,6 +47,40 @@ make build      # produces ./vpncli
 vpncli version
 vpncli --help
 ```
+
+Set up where servers get created:
+
+```sh
+export DIGITALOCEAN_TOKEN=dop_v1_...   # DIGITALOCEAN_ACCESS_TOKEN also works
+vpncli init
+```
+
+```
+Answers are written to ~/.config/vpncli/config.yaml
+
+Provider: DigitalOcean (digitalocean), the only one implemented
+
+Fetching regions from digitalocean...
+
+Pick one close to you. Latency is the one cost a VPN cannot make back.
+
+  1)  ams3  Amsterdam 3
+  2)  blr1  Bangalore 1
+  3)  fra1  Frankfurt 1
+  4)  nyc3  New York 3
+  5)  syd1  Sydney 1
+
+Region: 3
+```
+
+An answer is either the number or the slug, and re-running the wizard offers
+the current value as the default, so `vpncli init` doubles as a way to change
+one setting. Regions the account cannot create in are not offered. Nothing is
+written until the last question is answered - an abandoned wizard leaves no
+half-filled config behind.
+
+It is a numbered list rather than a cursor-driven menu on purpose: this has to
+work over SSH and in a pipe, which is where a VPS is usually being set up from.
 
 List every droplet in a DigitalOcean account, straight from the API:
 
@@ -118,6 +151,7 @@ internal/manager/                provider + state, joined
 internal/provider/               VPSProvider interface and shared types
 internal/provider/digitalocean/  DigitalOcean implementation
 internal/config/                 config file + XDG paths
+internal/prompt/                 the wizard's questions
 internal/state/                  SQLite state store
 ```
 
@@ -157,8 +191,8 @@ locally, so packaging can be rehearsed before the tag goes out.
 | v0.1.0 | ✅ Scaffold: CLI, provider interface, config, SQLite schema |
 | v0.2.0 | ✅ DigitalOcean read-only: `ListInstances`, `providers do list` |
 | v0.3.0 | ✅ DigitalOcean create/delete, `WaitReady`, 429 backoff |
-| **v0.4.0** | ✅ State wired into create/delete; `list` and `sync` |
-| v0.5.0 | Wizard: provider + region select |
+| v0.4.0 | ✅ State wired into create/delete; `list` and `sync` |
+| **v0.5.0** | ✅ Wizard: provider + region select |
 | v0.6.0 | Wizard: size + OS select |
 | v0.7.0 | Wizard: REALITY camouflage; `provision` wiring |
 | v0.8.0 | Xray-core bootstrap over SSH, nginx decoy, BBR, ufw lockdown |

@@ -139,10 +139,12 @@ func (f *fakeDroplets) List(_ context.Context, opt *godo.ListOptions) ([]godo.Dr
 	return f.pages[idx], &godo.Response{Links: links}, nil
 }
 
-// newTestProvider wires a provider to the fake, with waiting and dialing
-// stubbed: a test must spend no real time and open no real sockets.
+// newTestProvider wires a provider to the fake droplets service, with waiting
+// and dialing stubbed: a test must spend no real time and open no real
+// sockets. The regions service is left nil, since nothing on this path calls
+// it - catalog_test.go wires that half.
 func newTestProvider(f *fakeDroplets) *Provider {
-	p := newProvider(f)
+	p := newProvider(f, nil)
 	p.sleep = f.sleep
 	p.dialSSH = f.dial
 	return p
@@ -424,27 +426,6 @@ func TestTokenFromEnv(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestUnimplementedMethodsReportSo(t *testing.T) {
-	ctx := context.Background()
-	p := newTestProvider(&fakeDroplets{})
-
-	tests := []struct {
-		name string
-		call func() error
-	}{
-		{"ListRegions", func() error { _, err := p.ListRegions(ctx); return err }},
-		{"ListSizes", func() error { _, err := p.ListSizes(ctx); return err }},
-		{"ListImages", func() error { _, err := p.ListImages(ctx); return err }},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.call(); !errors.Is(err, ErrNotImplemented) {
-				t.Errorf("got %v, want ErrNotImplemented", err)
 			}
 		})
 	}

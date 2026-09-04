@@ -387,6 +387,13 @@ sudo sing-box run -c ~/vpn.json
 Both carry the same tunnel and the same credentials; the difference is only
 where traffic enters it.
 
+The tun config keeps the local network local: traffic to a private address
+goes out of the normal interface rather than into the tunnel. That is not a
+convenience. The server drops private destinations on purpose - a tunnel that
+can reach the provider's metadata service can hand out the account's own
+credentials - so without the rule a printer, a NAS or a router page is not
+slow, it is `connection refused` from three countries away.
+
 `-o` is worth using over `>`. The file is created `0600`, because it carries
 the key to your server, and the command prints exactly how to run what it just
 wrote - which matters because a tun config run without root creates no

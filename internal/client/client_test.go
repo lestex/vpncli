@@ -262,3 +262,47 @@ func TestSingBoxTunCarriesTheSameOutbound(t *testing.T) {
 		t.Error("the tun config carries the server's private key")
 	}
 }
+
+// The server drops traffic to private addresses on purpose, so a tun config
+// that routes the local network into the tunnel turns a printer or a router
+// page into a connection refused from three countries away.
+func TestSingBoxTunKeepsTheLocalNetworkLocal(t *testing.T) {
+	raw, err := SingBox(configured(), Tun)
+	if err != nil {
+		t.Fatalf("SingBox(Tun): %v", err)
+	}
+
+	var config struct {
+		Route struct {
+			Rules []struct {
+				IPIsPrivate bool   `json:"ip_is_private"`
+				Outbound    string `json:"outbound"`
+			} `json:"rules"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+
+	var found bool
+	for _, rule := range config.Route.Rules {
+		if rule.IPIsPrivate && rule.Outbound == "direct" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("nothing keeps private addresses out of the tunnel:\n%s", raw)
+	}
+}
+
+// A proxy carries only what is pointed at it, so it has no routing to do and
+// nothing to keep out of the way.
+func TestSingBoxProxyHasNoRouting(t *testing.T) {
+	raw, err := SingBox(configured(), Proxy)
+	if err != nil {
+		t.Fatalf("SingBox(Proxy): %v", err)
+	}
+	if strings.Contains(string(raw), "ip_is_private") {
+		t.Errorf("the proxy config carries tun routing:\n%s", raw)
+	}
+}

@@ -173,7 +173,13 @@ type singBoxRoute struct {
 	// AutoDetectInterface is what keeps the connection to the server itself
 	// outside the tunnel it carries. Without it the tunnel routes its own
 	// traffic into itself.
-	AutoDetectInterface bool `json:"auto_detect_interface"`
+	AutoDetectInterface bool          `json:"auto_detect_interface"`
+	Rules               []singBoxRule `json:"rules,omitempty"`
+}
+
+type singBoxRule struct {
+	IPIsPrivate bool   `json:"ip_is_private"`
+	Outbound    string `json:"outbound"`
 }
 
 type singBoxLog struct {
@@ -269,7 +275,16 @@ func SingBox(srv state.Server, mode Mode) ([]byte, error) {
 			Server: tunResolver,
 			Detour: "proxy",
 		}}}
-		config.Route = &singBoxRoute{AutoDetectInterface: true}
+		config.Route = &singBoxRoute{
+			AutoDetectInterface: true,
+			// Everything on the local network stays on it. The server drops
+			// traffic to private addresses on purpose - a tunnel that can
+			// reach the provider's metadata service can hand out the
+			// account's credentials - so without this rule a printer, a NAS
+			// or a router page is not slow or blocked, it is a connection
+			// refused from three countries away.
+			Rules: []singBoxRule{{IPIsPrivate: true, Outbound: "direct"}},
+		}
 	}
 
 	rendered, err := json.MarshalIndent(config, "", "  ")

@@ -141,7 +141,9 @@ func (m *Manager) Provision(ctx context.Context, opts provider.CreateOptions) (s
 
 	srv, err := m.store.Insert(ctx, toServer(inst))
 	if err != nil {
-		return state.Server{}, fmt.Errorf("recording server %s: %w", inst.ID, err)
+		// The server exists and is billing, so the id and the way back to it
+		// belong in the error: it carries the tag, so a sync adopts it.
+		return state.Server{}, fmt.Errorf("recording server %s: %w (the server was created and is untracked - run `vpncli sync` to adopt it)", inst.ID, err)
 	}
 
 	ready, err := m.provider.WaitReady(ctx, inst.ID)
@@ -158,6 +160,10 @@ func (m *Manager) Provision(ctx context.Context, opts provider.CreateOptions) (s
 	return srv, nil
 }
 
+// ErrWrongProvider reports a row that belongs to a provider other than the
+// configured one.
+var ErrWrongProvider = errors.New("server belongs to another provider")
+
 // Destroy deletes the server behind a local id, provider first and state
 // second. A server already gone from the provider is not an error - the row is
 // exactly what needs clearing - but a failed delete leaves the row in place so
@@ -166,6 +172,13 @@ func (m *Manager) Destroy(ctx context.Context, id int64) (state.Server, error) {
 	srv, err := m.store.Get(ctx, id)
 	if err != nil {
 		return state.Server{}, err
+	}
+
+	// Provider ids are only unique within a provider, so a row from another
+	// one would aim the delete at whatever happens to carry that id here.
+	// Sync skips such rows for the same reason.
+	if srv.Provider != m.provider.Name() {
+		return srv, fmt.Errorf("%w: server %d is on %s, the configured provider is %s", ErrWrongProvider, srv.ID, srv.Provider, m.provider.Name())
 	}
 
 	if err := m.provider.DeleteInstance(ctx, srv.ProviderID); err != nil && !errors.Is(err, provider.ErrNotFound) {

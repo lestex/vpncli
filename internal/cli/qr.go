@@ -10,12 +10,16 @@ import (
 
 // quietZone is the light border a QR code needs on every side, in modules.
 //
-// The spec says four. Two is what is drawn here, with a blank line kept above
+// The spec says four. One is what is drawn here, with a blank line kept above
 // and below the code: on a screen, read at close range with nothing but a
-// prompt around it, a scanner finds the code either way, and every module of
-// border costs a column of a terminal that is often eighty wide. A printed
-// code, or one over a photograph, would want the full four.
-const quietZone = 2
+// prompt around it, a scanner finds the code with far less than the spec asks
+// for, and every module of border costs a column of a terminal that is often
+// eighty wide. A printed code, or one over a photograph, would want four.
+//
+// Zero would not do. Outside the code the terminal paints its own background,
+// which on a dark theme reads as a border of dark modules - the one thing a
+// scanner cannot tell from the code itself.
+const quietZone = 1
 
 // Half a character cell. Drawing two rows of modules per line of text is what
 // keeps a code that is sixty modules wide from being sixty lines tall.

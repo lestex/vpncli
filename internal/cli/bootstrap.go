@@ -40,7 +40,7 @@ func newBootstrapCommand() *cobra.Command {
 		Short: "Configure a server that is not configured yet",
 		Long: `Install and configure VLESS+REALITY on a server that already exists.
 
-` + "`vpncli provision`" + ` does this itself. This command is for the server whose
+` + "`vpncli server provision`" + ` does this itself. This command is for the server whose
 bootstrap failed halfway - a network that dropped, an apt mirror having a bad
 day - where the server is fine and only the configuring needs another go.
 
@@ -55,7 +55,7 @@ inside the server and logged by the provider, so the keys go over SSH instead.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return fmt.Errorf("%q is not a server id: `vpncli list` shows them", args[0])
+				return fmt.Errorf("%q is not a server id: `vpncli server list` shows them", args[0])
 			}
 			return runBootstrapCommand(cmd.Context(), cmd.OutOrStdout(), dialSSH, reality.Check, id)
 		},
@@ -85,22 +85,23 @@ func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, chec
 
 	fmt.Fprintf(out, "Configuring %s (%s)...\n", srv.Name, srv.IPv4)
 
-	spin := startSpinner(out, "connecting")
-	err = bootstrapServer(ctx, store, cfg, srv, dial, check, spin.say)
-	spin.stop()
+	fmt.Fprintln(out)
+	list := startChecklist(out, bootstrap.Steps())
+	err = bootstrapServer(ctx, store, cfg, srv, dial, check, list.start)
+	list.stop(err)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "ready in %s\n", took(spin.elapsed()))
+	fmt.Fprintf(out, "\nready in %s\n", took(list.elapsed()))
 	fmt.Fprintf(out, "\n%s is serving VLESS+REALITY on %s:%d, camouflaged as %s.\n",
 		srv.Name, srv.IPv4, bootstrap.Port, cfg.Reality.Host())
-	fmt.Fprintf(out, "`vpncli connect %d` prints the link to reach it with.\n", srv.ID)
+	fmt.Fprintf(out, "`vpncli server connect %d` prints the link to reach it with.\n", srv.ID)
 	return nil
 }
 
 // bootstrapServer connects to a server, configures it, and records what it was
-// given. It is shared by `vpncli provision` and `vpncli bootstrap`.
+// given. It is shared by `vpncli server provision` and `vpncli server bootstrap`.
 //
 // The credentials are written only after the server is actually serving. A run
 // that failed halfway leaves the row unconfigured, which is exactly right: the
@@ -109,7 +110,7 @@ func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, chec
 func bootstrapServer(ctx context.Context, store *state.Store, cfg config.Config, srv state.Server, dial dialFunc, check checkFunc, progress bootstrap.Progress) error {
 	host := cfg.Reality.Host()
 	if host == "" {
-		return fmt.Errorf("config has no camouflage: run `vpncli init`")
+		return fmt.Errorf("config has no camouflage: run `vpncli providers init`")
 	}
 
 	// The wizard checks this too, but a config can be edited by hand and a
@@ -117,7 +118,7 @@ func bootstrapServer(ctx context.Context, store *state.Store, cfg config.Config,
 	// server built on a site REALITY cannot relay looks perfectly healthy and
 	// refuses every client, so it is worth one TLS connection to find out now.
 	if _, err := check(ctx, host); errors.Is(err, reality.ErrUnsuitable) {
-		return fmt.Errorf("%w: run `vpncli init` and pick another", err)
+		return fmt.Errorf("%w: run `vpncli providers init` and pick another", err)
 	}
 
 	client, err := dial(ctx, ssh.Config{

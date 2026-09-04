@@ -103,7 +103,7 @@ func usable(srv state.Server) error {
 	case srv.IPv4 == "":
 		return fmt.Errorf("server %d has no address yet: `vpncli sync` picks one up once it has booted", srv.ID)
 	case !srv.Bootstrapped() || !srv.Credentials.Complete():
-		return fmt.Errorf("%w: `vpncli bootstrap %d` configures it", ErrNotConfigured, srv.ID)
+		return fmt.Errorf("%w: `vpncli server bootstrap %d` configures it", ErrNotConfigured, srv.ID)
 	}
 	return nil
 }

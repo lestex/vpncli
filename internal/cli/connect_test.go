@@ -68,23 +68,23 @@ func connectTo(t *testing.T, id int64, asQR, asSingBox bool, mode client.Mode, p
 }
 
 func TestConnectIsRegistered(t *testing.T) {
-	out := run(t, "--help")
+	out := run(t, "server", "--help")
 	if !strings.Contains(out, "connect") {
-		t.Errorf("connect is missing from root help:\n%s", out)
+		t.Errorf("connect is missing from `vpncli server` help:\n%s", out)
 	}
 }
 
 func TestConnectNeedsExactlyOneID(t *testing.T) {
 	withStateDir(t)
 
-	for _, args := range [][]string{{"connect"}, {"connect", "1", "2"}} {
+	for _, args := range [][]string{{"server", "connect"}, {"server", "connect", "1", "2"}} {
 		if _, err := execute(args...); err == nil {
 			t.Errorf("%v was accepted, want an error", args)
 		}
 	}
 }
 
-// The link is the whole output, so `vpncli connect 3 | pbcopy` copies a link
+// The link is the whole output, so `vpncli server connect 3 | pbcopy` copies a link
 // and not a paragraph about one.
 func TestConnectPrintsOnlyTheLink(t *testing.T) {
 	srv := connectable(t)
@@ -155,7 +155,7 @@ func TestConnectSingBox(t *testing.T) {
 func TestConnectRefusesBothFormats(t *testing.T) {
 	connectable(t)
 
-	if _, err := execute("connect", "1", "--qr", "--sing-box"); err == nil {
+	if _, err := execute("server", "connect", "1", "--qr", "--sing-box"); err == nil {
 		t.Error("both formats were accepted, want an error")
 	}
 }
@@ -170,7 +170,7 @@ func TestConnectOnAnUnconfiguredServer(t *testing.T) {
 	if !errors.Is(err, client.ErrNotConfigured) {
 		t.Fatalf("got %v, want ErrNotConfigured", err)
 	}
-	if !strings.Contains(err.Error(), "vpncli bootstrap 1") {
+	if !strings.Contains(err.Error(), "vpncli server bootstrap 1") {
 		t.Errorf("error %q does not say how to fix it", err)
 	}
 }
@@ -196,7 +196,7 @@ func TestConnectNeedsNoToken(t *testing.T) {
 }
 
 func TestConnectHelpSaysWhatItPrints(t *testing.T) {
-	out := run(t, "connect", "--help")
+	out := run(t, "server", "connect", "--help")
 	for _, want := range []string{"vless://", "--qr", "--sing-box", "offline"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("connect help does not mention %q:\n%s", want, out)

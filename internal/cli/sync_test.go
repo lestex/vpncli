@@ -114,7 +114,7 @@ func TestOpenProvider(t *testing.T) {
 		cfg     config.Config
 		wantErr string
 	}{
-		// An unset field means `vpncli init` has not been run yet.
+		// An unset field means `vpncli providers init` has not been run yet.
 		{name: "unset falls back to the only implementation"},
 		{name: "named explicitly", cfg: config.Config{Provider: digitalocean.Name}},
 		{name: "not implemented yet", cfg: config.Config{Provider: "hetzner"}, wantErr: "hetzner"},
@@ -143,7 +143,7 @@ func TestOpenProvider(t *testing.T) {
 }
 
 // The sync help should tell the user which servers it will and will not touch,
-// since adopting the wrong one would put it under `vpncli destroy`.
+// since adopting the wrong one would put it under `vpncli server destroy`.
 func TestSyncHelpExplainsTagging(t *testing.T) {
 	out := run(t, "sync", "--help")
 	for _, want := range []string{provider.ManagedTag, "adopted", "tag"} {

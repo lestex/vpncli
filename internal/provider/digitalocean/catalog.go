@@ -18,7 +18,7 @@ import (
 // paginated, so a hardcoded single request would silently truncate.
 const catalogPerPage = 200
 
-// catalog groups the read-only lookups the `vpncli init` wizard makes. They
+// catalog groups the read-only lookups the `vpncli providers init` wizard makes. They
 // are separated from the droplets service because the create, inspect and
 // delete path never touches them.
 type catalog struct {

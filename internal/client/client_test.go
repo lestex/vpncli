@@ -118,7 +118,7 @@ func TestURINeedsAConfiguredServer(t *testing.T) {
 	if !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("got %v, want ErrNotConfigured", err)
 	}
-	if !strings.Contains(err.Error(), "vpncli bootstrap 3") {
+	if !strings.Contains(err.Error(), "vpncli server bootstrap 3") {
 		t.Errorf("error %q does not say how to fix it", err)
 	}
 }

@@ -7,9 +7,9 @@ configured with VLESS+REALITY (Xray-core).
 
 One static Go binary. No Terraform, no domain, no CDN.
 
-> **Status: v1.0.0 - the whole workflow.** `vpncli provision` creates and
-> configures a server, `vpncli connect` builds the client config to reach it
-> with, and `vpncli rotate` replaces it with a fresh one that shares nothing
+> **Status: v1.0.0 - the whole workflow.** `vpncli server provision` creates and
+> configures a server, `vpncli server connect` builds the client config to reach it
+> with, and `vpncli server rotate` replaces it with a fresh one that shares nothing
 > with it. See [Roadmap](#roadmap).
 
 ## Why it is built this way
@@ -63,7 +63,7 @@ Set up where servers get created:
 
 ```sh
 export DIGITALOCEAN_TOKEN=dop_v1_...   # DIGITALOCEAN_ACCESS_TOKEN also works
-vpncli init
+vpncli providers init
 ```
 
 ```
@@ -127,7 +127,7 @@ Camouflage [www.microsoft.com]:
 ```
 
 An answer is either the number or the slug, and re-running the wizard offers
-the current value as the default, so `vpncli init` doubles as a way to change
+the current value as the default, so `vpncli providers init` doubles as a way to change
 one setting. Nothing is written until the last question is answered - Ctrl-C or
 Ctrl-D gets out of any question, and an abandoned wizard leaves no half-filled
 config behind.
@@ -175,7 +175,7 @@ List every droplet in a DigitalOcean account, straight from the API:
 
 ```sh
 export DIGITALOCEAN_TOKEN=dop_v1_...   # DIGITALOCEAN_ACCESS_TOKEN also works
-vpncli providers do list
+vpncli providers do
 ```
 
 ```
@@ -190,8 +190,16 @@ for confirming a token works and for spotting drift.
 List the servers vpncli itself tracks, from local state:
 
 ```sh
-vpncli list
+vpncli server list
 ```
+
+```
+ID  PROVIDER      NAME                REGION  SIZE         IMAGE             IPV4          STATUS  AGE
+3   digitalocean  vpncli-ams3-0a910d  ams3    s-1vcpu-1gb  ubuntu-24-04-x64  203.0.113.10  active  2h
+```
+
+The provider column is there because the id alone stops being unique the
+moment a second provider is configured: what names a server is the pair.
 
 No API call, so it is instant, works offline, and needs no token. The `ID`
 column is the short local id that other commands take. The trade is staleness:
@@ -214,16 +222,34 @@ Untagged servers are left alone, because that listing covers the whole account.
 Create a server from those answers:
 
 ```sh
-vpncli provision
+vpncli server provision
 ```
 
 ```
 Creating vpncli-fra1-7d3a91 (s-1vcpu-1gb, fra1) on digitalocean...
-⠹ installing Xray-core v26.3.27 (1m48s)
+
+  ✓ installing packages
+  ✓ turning on BBR
+  ⠹ installing Xray-core v26.3.27 (48s)
+    writing the server config
+    putting up the decoy site
+    starting Xray
+    closing the firewall
+    checking it came up
 ```
 
 ```
 Creating vpncli-fra1-7d3a91 (s-1vcpu-1gb, fra1) on digitalocean...
+
+  ✓ installing packages
+  ✓ turning on BBR
+  ✓ installing Xray-core v26.3.27
+  ✓ writing the server config
+  ✓ putting up the decoy site
+  ✓ starting Xray
+  ✓ closing the firewall
+  ✓ checking it came up
+
 ready in 3m11s
 
 ID  NAME                REGION  SIZE         IMAGE             IPV4          STATUS  AGE
@@ -232,14 +258,19 @@ ID  NAME                REGION  SIZE         IMAGE             IPV4          STA
 Serving VLESS+REALITY on 203.0.113.10:443, camouflaged as www.apple.com.
 ```
 
-Creating takes about a minute and configuring another two, so the wait spins
-and says which step it is on. Redirected into a pipe or a file it draws
-nothing, and neither does a terminal that says it is `dumb`.
+Creating takes about a minute and configuring another two, so the steps are on
+screen and tick off as they finish, with a clock against whichever is running -
+a stall shows up as one step's time running away. A step that fails is marked
+and left there, so what went wrong stays on screen next to the error.
+
+Redirected into a pipe or a file, each step is printed once as it starts and
+nothing is redrawn, so a log reads as a plain list of what happened. A terminal
+that says it is `dumb` gets the same.
 
 The row is written as soon as the provider accepts the request, before the wait
 for the server to boot. That ordering is deliberate: a server that exists but is
 in nobody's state file is invisible and still billed, so an interrupted wait
-leaves something `vpncli destroy` can clean up, and `vpncli sync` finds it from
+leaves something `vpncli server destroy` can clean up, and `vpncli sync` finds it from
 any machine.
 
 ### What the bootstrap does
@@ -283,7 +314,7 @@ If the bootstrap fails halfway - a dropped connection, an apt mirror having a
 bad day - the server is fine and only the configuring needs another go:
 
 ```sh
-vpncli bootstrap 3
+vpncli server bootstrap 3
 ```
 
 That generates fresh key material and replaces whatever reached the server, so
@@ -293,7 +324,7 @@ locally until the server is actually serving.
 Destroy one:
 
 ```sh
-vpncli destroy 3
+vpncli server destroy 3
 ```
 
 ```
@@ -310,7 +341,7 @@ accepted as a confirmation - not even `y`.
 Connect to it:
 
 ```sh
-vpncli connect 3
+vpncli server connect 3
 ```
 
 ```
@@ -320,21 +351,21 @@ vless://1e089a02-...@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&fp=c
 The link is the whole output, so it pipes:
 
 ```sh
-vpncli connect 3 | pbcopy
+vpncli server connect 3 | pbcopy
 ```
 
 For a phone, `--qr` draws the same link in the terminal, which gets it across
 without going through anything that keeps a copy:
 
 ```sh
-vpncli connect 3 --qr
+vpncli server connect 3 --qr
 ```
 
 For a desktop, `--sing-box` writes a sing-box config instead - a SOCKS and HTTP
 proxy on `127.0.0.1:1080`, which needs no privileges:
 
 ```sh
-vpncli connect 3 --sing-box -o ~/vpn.json
+vpncli server connect 3 --sing-box -o ~/vpn.json
 sing-box run -c ~/vpn.json
 ```
 
@@ -349,7 +380,7 @@ included, and DNS with them. Creating an interface and rewriting the routing
 table needs root:
 
 ```sh
-vpncli connect 3 --tun -o ~/vpn.json
+vpncli server connect 3 --tun -o ~/vpn.json
 sudo sing-box run -c ~/vpn.json
 ```
 
@@ -375,7 +406,7 @@ which one you picked.
 Replace a server with a fresh one:
 
 ```sh
-vpncli rotate 3
+vpncli server rotate 3
 ```
 
 ```
@@ -390,7 +421,7 @@ ID  NAME                REGION  SIZE         IMAGE             IPV4          STA
 4   vpncli-ams3-7d3a91  ams3    s-1vcpu-1gb  ubuntu-24-04-x64  203.0.113.44  active  just now
 
 Serving VLESS+REALITY on 203.0.113.44:443, camouflaged as www.samsung.com.
-Its address and keys are new, so every client needs `vpncli connect 4` again.
+Its address and keys are new, so every client needs `vpncli server connect 4` again.
 ```
 
 This is the workflow the whole program is shaped around. The replacement
@@ -401,8 +432,28 @@ The order is the important part: the replacement is created and confirmed to
 be serving *before* anything is destroyed, so a rotation that fails leaves the
 old server exactly where it was, and says so. Both are billed for the couple
 of minutes in between. The replacement is built from the current config, so it
-picks up anything `vpncli init` has changed since, and it gets a new local id,
+picks up anything `vpncli providers init` has changed since, and it gets a new local id,
 because it is a different server.
+
+## Commands
+
+```
+vpncli providers init       the wizard: provider, region, size, image, key
+vpncli providers do         every droplet in the account, from the API
+
+vpncli server provision     create a server and configure it
+vpncli server list          what local state knows about
+vpncli server connect 3     the link, QR or client config to reach one
+vpncli server bootstrap 3   configure one that is not configured yet
+vpncli server rotate 3      replace one with a fresh server
+vpncli server destroy 3     delete one and forget it
+
+vpncli sync                 reconcile local state against the provider
+```
+
+Everything that acts on a server is grouped under `server`, and everything
+about a cloud account under `providers`. What is left at the top level is
+`sync`, which is the one command that reconciles the two.
 
 ## Files
 
@@ -473,7 +524,7 @@ locally, so packaging can be rehearsed before the tag goes out.
 | Version | Scope |
 | --- | --- |
 | v0.1.0 | ✅ Scaffold: CLI, provider interface, config, SQLite schema |
-| v0.2.0 | ✅ DigitalOcean read-only: `ListInstances`, `providers do list` |
+| v0.2.0 | ✅ DigitalOcean read-only: `ListInstances`, `providers do` |
 | v0.3.0 | ✅ DigitalOcean create/delete, `WaitReady`, 429 backoff |
 | v0.4.0 | ✅ State wired into create/delete; `list` and `sync` |
 | v0.5.0 | ✅ Wizard: provider + region select |
@@ -486,7 +537,7 @@ locally, so packaging can be rehearsed before the tag goes out.
 ## Clients
 
 Servers are standard VLESS+REALITY, so any current client works, and
-`vpncli connect` speaks the two formats between them cover everything. On iOS,
+`vpncli server connect` speaks the two formats between them cover everything. On iOS,
 Shadowrocket (paid, most mature REALITY support) and Streisand (free, open
 source) both import from a `vless://` URI or QR code with no server-side
 accommodation. On a desktop, sing-box takes the generated config directly.

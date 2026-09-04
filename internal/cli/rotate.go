@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -35,7 +36,7 @@ server exactly where it was. That costs both servers for the couple of minutes
 in between, which is a few cents.
 
 The replacement is built from the current config, so it also picks up anything
-` + "`vpncli init`" + ` has changed since - a different region, size or camouflage.
+` + "`vpncli providers init`" + ` has changed since - a different region, size or camouflage.
 
 It gets a new local id, because it is a different server. Clients have to be
 reconfigured either way: the address and the keys they hold are both gone.
@@ -45,7 +46,7 @@ Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return fmt.Errorf("%q is not a server id: `vpncli list` shows them", args[0])
+				return fmt.Errorf("%q is not a server id: `vpncli server list` shows them", args[0])
 			}
 			return runRotate(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(),
 				openProvider, dialSSH, reality.Check, id, yes)
@@ -105,18 +106,25 @@ func runRotate(ctx context.Context, in io.Reader, out io.Writer, open openFunc, 
 
 	spin := startSpinner(out, "waiting for the replacement to boot")
 	replacement, err := m.Provision(ctx, opts)
-	if err == nil {
-		spin.say("connecting")
-		err = bootstrapServer(ctx, store, cfg, replacement, dial, check, spin.say)
-	}
 	spin.stop()
+	booted := spin.elapsed()
+
+	var configured time.Duration
+	if err == nil {
+		fmt.Fprintln(out)
+		list := startChecklist(out, bootstrap.Steps())
+		err = bootstrapServer(ctx, store, cfg, replacement, dial, check, list.start)
+		list.stop(err)
+		configured = list.elapsed()
+		fmt.Fprintln(out)
+	}
 	if err != nil {
 		// The old server is still serving, which is the point of building the
 		// new one first. Whatever was created is named so it can be dealt
 		// with; nothing is destroyed.
 		fmt.Fprintf(out, "%s is untouched and still serving.\n", old.Name)
 		if replacement.ID != 0 {
-			fmt.Fprintf(out, "The replacement is id %d: `vpncli bootstrap %d` tries again, `vpncli destroy %d` gives up on it.\n",
+			fmt.Fprintf(out, "The replacement is id %d: `vpncli server bootstrap %d` tries again, `vpncli server destroy %d` gives up on it.\n",
 				replacement.ID, replacement.ID, replacement.ID)
 		}
 		return err
@@ -128,7 +136,7 @@ func runRotate(ctx context.Context, in io.Reader, out io.Writer, open openFunc, 
 		return fmt.Errorf("destroying %s: %w", old.Name, err)
 	}
 
-	fmt.Fprintf(out, "rotated in %s: %s is gone\n\n", took(spin.elapsed()), old.Name)
+	fmt.Fprintf(out, "rotated in %s: %s is gone\n\n", took(booted+configured), old.Name)
 
 	replacement, err = store.Get(ctx, replacement.ID)
 	if err != nil {
@@ -140,7 +148,7 @@ func runRotate(ctx context.Context, in io.Reader, out io.Writer, open openFunc, 
 
 	fmt.Fprintf(out, "\nServing VLESS+REALITY on %s:%d, camouflaged as %s.\n",
 		replacement.IPv4, bootstrap.Port, replacement.Credentials.ServerName)
-	fmt.Fprintf(out, "Its address and keys are new, so every client needs `vpncli connect %d` again.\n",
+	fmt.Fprintf(out, "Its address and keys are new, so every client needs `vpncli server connect %d` again.\n",
 		replacement.ID)
 	return nil
 }

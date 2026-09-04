@@ -22,14 +22,8 @@ time.`,
 	}
 
 	root.AddCommand(
-		newBootstrapCommand(),
-		newConnectCommand(),
-		newDestroyCommand(),
-		newInitCommand(),
-		newListCommand(),
 		newProvidersCommand(),
-		newProvisionCommand(),
-		newRotateCommand(),
+		newServerCommand(),
 		newSyncCommand(),
 		newVersionCommand(),
 	)

@@ -111,16 +111,16 @@ func captureBootstrapWith(t *testing.T, dial dialFunc, check checkFunc, id int64
 }
 
 func TestBootstrapIsRegistered(t *testing.T) {
-	out := run(t, "--help")
+	out := run(t, "server", "--help")
 	if !strings.Contains(out, "bootstrap") {
-		t.Errorf("bootstrap is missing from root help:\n%s", out)
+		t.Errorf("bootstrap is missing from `vpncli server` help:\n%s", out)
 	}
 }
 
 func TestBootstrapNeedsExactlyOneID(t *testing.T) {
 	withStateDir(t)
 
-	for _, args := range [][]string{{"bootstrap"}, {"bootstrap", "1", "2"}} {
+	for _, args := range [][]string{{"server", "bootstrap"}, {"server", "bootstrap", "1", "2"}} {
 		if _, err := execute(args...); err == nil {
 			t.Errorf("%v was accepted, want an error", args)
 		}
@@ -270,7 +270,7 @@ func TestBootstrapWithNoCamouflageConfigured(t *testing.T) {
 	seedServers(t, doomedServer())
 
 	_, err := captureBootstrap(t, dialing(newFakeSSH(), nil), 1)
-	if err == nil || !strings.Contains(err.Error(), "vpncli init") {
+	if err == nil || !strings.Contains(err.Error(), "vpncli providers init") {
 		t.Fatalf("got %v, want an error pointing at the wizard", err)
 	}
 }
@@ -287,8 +287,8 @@ func TestBootstrapReportsAConnectionFailure(t *testing.T) {
 }
 
 func TestBootstrapHelpExplainsWhenToUseIt(t *testing.T) {
-	out := run(t, "bootstrap", "--help")
-	for _, want := range []string{"vpncli provision", "failed", "fresh key material"} {
+	out := run(t, "server", "bootstrap", "--help")
+	for _, want := range []string{"vpncli server provision", "failed", "fresh key material"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("bootstrap help does not mention %q:\n%s", want, out)
 		}
@@ -308,7 +308,7 @@ func TestBootstrapRefusesAnUnusableCamouflage(t *testing.T) {
 	if !errors.Is(err, reality.ErrUnsuitable) {
 		t.Fatalf("got %v, want ErrUnsuitable", err)
 	}
-	if !strings.Contains(err.Error(), "vpncli init") {
+	if !strings.Contains(err.Error(), "vpncli providers init") {
 		t.Errorf("error %q does not say how to fix it", err)
 	}
 

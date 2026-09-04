@@ -34,16 +34,16 @@ func doomedServer() state.Server {
 }
 
 func TestDestroyIsRegistered(t *testing.T) {
-	out := run(t, "--help")
+	out := run(t, "server", "--help")
 	if !strings.Contains(out, "destroy") {
-		t.Errorf("destroy is missing from root help:\n%s", out)
+		t.Errorf("destroy is missing from `vpncli server` help:\n%s", out)
 	}
 }
 
 func TestDestroyNeedsExactlyOneID(t *testing.T) {
 	withStateDir(t)
 
-	for _, args := range [][]string{{"destroy"}, {"destroy", "1", "2"}} {
+	for _, args := range [][]string{{"server", "destroy"}, {"server", "destroy", "1", "2"}} {
 		if _, err := execute(args...); err == nil {
 			t.Errorf("%v was accepted, want an error", args)
 		}
@@ -55,7 +55,7 @@ func TestDestroyNeedsExactlyOneID(t *testing.T) {
 func TestDestroyRejectsAnIDThatIsNotANumber(t *testing.T) {
 	withStateDir(t)
 
-	_, err := execute("destroy", "vpncli-fra1-a1b2c3")
+	_, err := execute("server", "destroy", "vpncli-fra1-a1b2c3")
 	if err == nil || !strings.Contains(err.Error(), "not a server id") {
 		t.Fatalf("got %v, want an error explaining what an id is", err)
 	}
@@ -65,7 +65,7 @@ func TestDestroyUnknownServer(t *testing.T) {
 	withStateDir(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	if _, err := execute("destroy", "42"); !errors.Is(err, state.ErrNotFound) {
+	if _, err := execute("server", "destroy", "42"); !errors.Is(err, state.ErrNotFound) {
 		t.Fatalf("got %v, want state.ErrNotFound", err)
 	}
 }
@@ -79,7 +79,7 @@ func TestDestroyAsksFirst(t *testing.T) {
 	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 	seedServers(t, doomedServer())
 
-	out, err := executeWith("no\n", "destroy", "1")
+	out, err := executeWith("no\n", "server", "destroy", "1")
 	if err != nil {
 		t.Fatalf("destroy: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestDestroyWithYesGoesStraightToTheProvider(t *testing.T) {
 	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 	seedServers(t, doomedServer())
 
-	out, err := executeWith("", "destroy", "1", "--yes")
+	out, err := executeWith("", "server", "destroy", "1", "--yes")
 	if !errors.Is(err, digitalocean.ErrNoToken) {
 		t.Fatalf("got %v, want the token error from the API step", err)
 	}
@@ -142,8 +142,8 @@ func TestConfirmDestroy(t *testing.T) {
 }
 
 func TestDestroyHelpSaysWhichIDItTakes(t *testing.T) {
-	out := run(t, "destroy", "--help")
-	for _, want := range []string{"vpncli list", "local"} {
+	out := run(t, "server", "destroy", "--help")
+	for _, want := range []string{"vpncli server list", "local"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("destroy help does not mention %q:\n%s", want, out)
 		}

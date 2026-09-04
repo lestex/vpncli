@@ -201,7 +201,7 @@ func TestSyncAdoptsTaggedServers(t *testing.T) {
 }
 
 // The listing is account-wide. Adopting everything in it would put someone's
-// unrelated production box under `vpncli destroy`.
+// unrelated production box under `vpncli server destroy`.
 func TestSyncIgnoresUntaggedServers(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeProvider{instances: []provider.VPSInstance{

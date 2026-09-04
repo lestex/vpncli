@@ -295,7 +295,7 @@ func authMethods(keyPath string) ([]ssh.AuthMethod, error) {
 		if len(reasons) > 0 {
 			return nil, fmt.Errorf("%w: %s", ErrNoAuth, strings.Join(reasons, "; "))
 		}
-		return nil, fmt.Errorf("%w: set ssh_key_path with `vpncli init`, or start an agent", ErrNoAuth)
+		return nil, fmt.Errorf("%w: set ssh_key_path with `vpncli providers init`, or start an agent", ErrNoAuth)
 	}
 	return methods, nil
 }

@@ -37,7 +37,7 @@ func newInitCommand() *cobra.Command {
 		Long: `Ask what servers should be created, and write the answers to config.yaml.
 
 Provider, region, size, image, SSH key and REALITY camouflage - which together
-are everything ` + "`vpncli provision`" + ` needs.
+are everything ` + "`vpncli server provision`" + ` needs.
 
 Re-running it is safe: every question is offered with the current value as the
 default, and settings it does not ask about are left as they are.
@@ -138,7 +138,7 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc, ch
 	p.Printf("  ssh key    %s\n", sshKeySummary(keyName, cfg.SSHKeyIDs))
 	p.Printf("  key file   %s\n", cfg.SSHKeyPath)
 	p.Printf("  camouflage %s\n", cfg.Reality.Dest)
-	p.Printf("\nThat is everything a server needs. Create one with `vpncli provision`.\n")
+	p.Printf("\nThat is everything a server needs. Create one with `vpncli server provision`.\n")
 
 	return nil
 }
@@ -364,7 +364,7 @@ func askSSHKeyPath(ctx context.Context, p *prompt.Prompter, current, keyName str
 		// perfectly good answer, and is the only one for a key with a
 		// passphrase.
 		p.Printf("There is no file at %s. If your agent holds the key that is fine;\n", path)
-		p.Printf("otherwise `vpncli bootstrap` will not be able to log in.\n")
+		p.Printf("otherwise `vpncli server bootstrap` will not be able to log in.\n")
 	}
 	return answer, nil
 }

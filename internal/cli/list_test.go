@@ -48,16 +48,33 @@ func testServer(providerID, name, ipv4, status string) state.Server {
 }
 
 func TestListIsRegistered(t *testing.T) {
-	out := run(t, "--help")
+	out := run(t, "server", "--help")
 	if !strings.Contains(out, "list") {
-		t.Errorf("list is missing from root help:\n%s", out)
+		t.Errorf("list is missing from `vpncli server` help:\n%s", out)
+	}
+}
+
+// The group itself has to be findable from the top.
+func TestServerGroupIsRegistered(t *testing.T) {
+	out := run(t, "--help")
+	if !strings.Contains(out, "server") {
+		t.Errorf("server is missing from root help:\n%s", out)
+	}
+}
+
+// `vpncli servers list` is what half of everyone will type.
+func TestServerGroupTakesThePlural(t *testing.T) {
+	withStateDir(t)
+
+	if _, err := execute("servers", "list"); err != nil {
+		t.Errorf("`vpncli servers list`: %v", err)
 	}
 }
 
 func TestListEmptyState(t *testing.T) {
 	withStateDir(t)
 
-	out := run(t, "list")
+	out := run(t, "server", "list")
 	if !strings.Contains(out, "no servers found") {
 		t.Errorf("got %q, want the empty message", out)
 	}
@@ -70,7 +87,7 @@ func TestListPrintsLocalIDs(t *testing.T) {
 		testServer("1002", "vpncli-ams3-c3d4", "", "provisioning"),
 	)
 
-	out := run(t, "list")
+	out := run(t, "server", "list")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) != 3 {
 		t.Fatalf("got %d lines, want a header plus 2 rows:\n%s", len(lines), out)
@@ -94,7 +111,7 @@ func TestListNeedsNoToken(t *testing.T) {
 	t.Setenv("DIGITALOCEAN_ACCESS_TOKEN", "")
 	seedServers(t, testServer("1001", "vpncli-fra1-a1b2", "203.0.113.10", "active"))
 
-	out := run(t, "list")
+	out := run(t, "server", "list")
 	if !strings.Contains(out, "vpncli-fra1-a1b2") {
 		t.Errorf("got %q, want the seeded server", out)
 	}
@@ -103,7 +120,7 @@ func TestListNeedsNoToken(t *testing.T) {
 func TestListRejectsArgs(t *testing.T) {
 	withStateDir(t)
 
-	if _, err := execute("list", "unexpected"); err == nil {
+	if _, err := execute("server", "list", "unexpected"); err == nil {
 		t.Error("expected an error for an unexpected positional argument")
 	}
 }

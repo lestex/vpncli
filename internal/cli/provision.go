@@ -22,11 +22,11 @@ func newProvisionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "provision",
 		Short: "Create a server from the configured answers",
-		Long: `Create a server using what ` + "`vpncli init`" + ` wrote, and wait for it to boot.
+		Long: `Create a server using what ` + "`vpncli providers init`" + ` wrote, and wait for it to boot.
 
 The row is recorded as soon as the provider accepts the request, before the
 wait: a server that exists but is not in state is invisible and still billed.
-So an interrupted wait leaves something ` + "`vpncli destroy`" + ` can clean up, and
+So an interrupted wait leaves something ` + "`vpncli server destroy`" + ` can clean up, and
 ` + "`vpncli sync`" + ` picks it up on any machine.
 
 The server comes up as a stock OS image with the configured SSH key installed.
@@ -72,29 +72,31 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc, dial dialFu
 	spin := startSpinner(out, "waiting for the server to boot")
 	srv, err := manager.New(vps, store).Provision(ctx, opts)
 	spin.stop()
+	booted := spin.elapsed()
 
 	if err != nil {
 		// A wait that failed still leaves a server running and recorded. Its
 		// id is how it gets cleaned up, and saying so here is cheaper than
 		// finding out from a bill.
 		if srv.ID != 0 {
-			fmt.Fprintf(out, "the server was created and recorded as id %d: `vpncli destroy %d` removes it\n", srv.ID, srv.ID)
+			fmt.Fprintf(out, "the server was created and recorded as id %d: `vpncli server destroy %d` removes it\n", srv.ID, srv.ID)
 		}
 		return err
 	}
 
 	// The server exists; now it has to be made into something worth having.
 	// Its row is already written, so a bootstrap that fails leaves a server
-	// `vpncli bootstrap` can finish rather than one to throw away.
-	spin = startSpinner(out, "connecting")
-	err = bootstrapServer(ctx, store, cfg, srv, dial, check, spin.say)
-	spin.stop()
+	// `vpncli server bootstrap` can finish rather than one to throw away.
+	fmt.Fprintln(out)
+	list := startChecklist(out, bootstrap.Steps())
+	err = bootstrapServer(ctx, store, cfg, srv, dial, check, list.start)
+	list.stop(err)
 	if err != nil {
-		fmt.Fprintf(out, "the server is up but not configured: `vpncli bootstrap %d` tries again\n", srv.ID)
+		fmt.Fprintf(out, "\nthe server is up but not configured: `vpncli server bootstrap %d` tries again\n", srv.ID)
 		return err
 	}
 
-	fmt.Fprintf(out, "ready in %s\n\n", took(spin.elapsed()))
+	fmt.Fprintf(out, "\nready in %s\n\n", took(booted+list.elapsed()))
 	if err := printServers(out, []state.Server{srv}); err != nil {
 		return err
 	}
@@ -124,7 +126,7 @@ func createOptions(cfg config.Config) (provider.CreateOptions, error) {
 		}
 	}
 	if len(missing) > 0 {
-		return provider.CreateOptions{}, fmt.Errorf("config has no %s: run `vpncli init`", strings.Join(missing, ", "))
+		return provider.CreateOptions{}, fmt.Errorf("config has no %s: run `vpncli providers init`", strings.Join(missing, ", "))
 	}
 
 	name, err := serverName(cfg.Region)

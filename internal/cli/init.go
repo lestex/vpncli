@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -21,10 +24,10 @@ func newInitCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
 		Short: "Configure vpncli interactively",
-		Long: `Ask where servers should be created, and write the answers to config.yaml.
+		Long: `Ask what servers should be created, and write the answers to config.yaml.
 
-Provider and region are what it asks today. Size, image and REALITY camouflage
-join the wizard in later versions.
+Provider, region, size and image are what it asks today. REALITY camouflage
+joins the wizard in the next version.
 
 Re-running it is safe: every question is offered with the current value as the
 default, and settings it does not ask about are left as they are.
@@ -79,6 +82,20 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) er
 	}
 	cfg.Region = region
 
+	// Which sizes exist depends on the region, so this question has to come
+	// after that one.
+	size, err := selectSize(ctx, p, vps, cfg.Region, cfg.Size)
+	if err != nil {
+		return err
+	}
+	cfg.Size = size
+
+	image, err := selectImage(ctx, p, vps, cfg.Image)
+	if err != nil {
+		return err
+	}
+	cfg.Image = image
+
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -86,8 +103,10 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) er
 	p.Printf("\nWrote %s\n", path)
 	p.Printf("  provider  %s\n", cfg.Provider)
 	p.Printf("  region    %s\n", cfg.Region)
-	p.Printf("\nSize and image selection land in the next version; until then\n")
-	p.Printf("`vpncli sync` and `vpncli list` are what this config is good for.\n")
+	p.Printf("  size      %s\n", cfg.Size)
+	p.Printf("  image     %s\n", cfg.Image)
+	p.Printf("\nThat is everything a server needs except its camouflage, which the\n")
+	p.Printf("next version asks for and `vpncli provision` will use.\n")
 
 	return nil
 }
@@ -113,7 +132,9 @@ func selectProvider(p *prompt.Prompter, current string) (string, error) {
 	return options[i].Key, nil
 }
 
-// selectRegion asks where servers should live.
+// selectRegion asks where servers should live. There is no invented default
+// here: which datacenter is closest is the one thing the wizard cannot guess,
+// and the alphabetically first region is no better an answer than any other.
 func selectRegion(ctx context.Context, p *prompt.Prompter, vps provider.VPSProvider, current string) (string, error) {
 	p.Printf("\nFetching regions from %s...\n\n", vps.Name())
 
@@ -142,4 +163,123 @@ func selectRegion(ctx context.Context, p *prompt.Prompter, vps provider.VPSProvi
 		return "", err
 	}
 	return options[i].Key, nil
+}
+
+// sizesShown caps the size menu. An account can create some seventy sizes and
+// a VPN can use almost none of them, so the list is the cheapest few rather
+// than all of them.
+const sizesShown = 8
+
+// supportedDistributions are the images the bootstrap knows how to configure,
+// in the order they are offered. It is apt, nginx, ufw and a BBR sysctl, so
+// offering Fedora or Rocky would only produce a server that cannot be
+// finished. Ubuntu leads because that is what the bootstrap is developed
+// against.
+var supportedDistributions = []string{"Ubuntu", "Debian"}
+
+// selectSize asks how big a server to create.
+func selectSize(ctx context.Context, p *prompt.Prompter, vps provider.VPSProvider, region, current string) (string, error) {
+	p.Printf("\nFetching sizes for %s...\n\n", region)
+
+	sizes, err := vps.ListSizes(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	options := make([]prompt.Option, 0, sizesShown+1)
+	for _, size := range sizes {
+		if !size.Available || !slices.Contains(size.Regions, region) {
+			continue
+		}
+		// Past the cheapest few is a long list of machines nobody would put a
+		// tunnel on. Whatever is already configured stays on the menu whatever
+		// it costs, so re-running the wizard cannot quietly take away a size
+		// that was chosen deliberately.
+		if len(options) >= sizesShown && size.Slug != current {
+			continue
+		}
+		options = append(options, prompt.Option{Key: size.Slug, Label: describeSize(size)})
+	}
+	if len(options) == 0 {
+		return "", fmt.Errorf("%s has no sizes available in %s", vps.Name(), region)
+	}
+
+	p.Printf("A tunnel is network-bound, not CPU-bound. The cheapest size is the\n")
+	p.Printf("right answer far more often than not.\n\n")
+
+	i, err := p.Select("Size", options, defaultOf(current, options))
+	if err != nil {
+		return "", err
+	}
+	return options[i].Key, nil
+}
+
+// selectImage asks which OS to install.
+func selectImage(ctx context.Context, p *prompt.Prompter, vps provider.VPSProvider, current string) (string, error) {
+	p.Printf("\nFetching images...\n\n")
+
+	images, err := vps.ListImages(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	var options []prompt.Option
+	for _, distribution := range supportedDistributions {
+		for _, image := range images {
+			// An image with no slug cannot be named in a create request.
+			if image.Distribution != distribution || image.Slug == "" {
+				continue
+			}
+			options = append(options, prompt.Option{Key: image.Slug, Label: describeImage(image)})
+		}
+	}
+	if len(options) == 0 {
+		return "", fmt.Errorf("%s offers no %s image", vps.Name(), strings.Join(supportedDistributions, " or "))
+	}
+
+	i, err := p.Select("Image", options, defaultOf(current, options))
+	if err != nil {
+		return "", err
+	}
+	return options[i].Key, nil
+}
+
+// describeSize renders a size as what it costs and what that buys. The tabs
+// are columns: the menu aligns them along with everything else on the line.
+func describeSize(size provider.Size) string {
+	return fmt.Sprintf("%s\t%s RAM\t%d vCPU\t%dGB disk",
+		price(size.PriceMonthly), memory(size.MemoryMB), size.VCPUs, size.DiskGB)
+}
+
+// describeImage names the distribution, since an image name on its own is
+// often just a version number.
+func describeImage(image provider.Image) string {
+	return strings.TrimSpace(image.Distribution + " " + image.Name)
+}
+
+// price renders a monthly price, keeping the cents only when there are any.
+func price(monthly float64) string {
+	if monthly == math.Trunc(monthly) {
+		return fmt.Sprintf("$%.0f/mo", monthly)
+	}
+	return fmt.Sprintf("$%.2f/mo", monthly)
+}
+
+// memory renders megabytes the way the size slugs do.
+func memory(mb int) string {
+	if mb < 1024 || mb%1024 != 0 {
+		return fmt.Sprintf("%dMB", mb)
+	}
+	return fmt.Sprintf("%dGB", mb/1024)
+}
+
+// defaultOf is what an empty answer means: whatever is already configured, or
+// else the first option. Both lists lead with the sensible choice - cheapest
+// size, newest Ubuntu - so a first run can be walked through on the Enter key
+// once the region is answered.
+func defaultOf(current string, options []prompt.Option) string {
+	if current != "" {
+		return current
+	}
+	return options[0].Key
 }

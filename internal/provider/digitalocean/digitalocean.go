@@ -1,7 +1,6 @@
 // Package digitalocean implements provider.VPSProvider for DigitalOcean. The
-// create, inspect and delete path is complete, as is the region catalog the
-// `vpncli init` wizard reads; sizes and images land with the wizard steps that
-// ask for them.
+// create, inspect and delete path is complete, as are the catalog lookups the
+// `vpncli init` wizard reads.
 package digitalocean
 
 import (
@@ -44,10 +43,6 @@ const (
 	defaultMaxAttempts = 5
 )
 
-// ErrNotImplemented is returned by the catalog lookups that have no wizard
-// step asking for them yet.
-var ErrNotImplemented = errors.New("not implemented: this catalog lookup lands with the wizard step that needs it")
-
 // ErrNoToken is returned when no API token is present in the environment.
 var ErrNoToken = errors.New("no DigitalOcean API token: set DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN")
 
@@ -60,7 +55,7 @@ var ErrInvalidOptions = errors.New("invalid create options")
 // each and neither touch the network nor spend real time.
 type Provider struct {
 	droplets godo.DropletsService
-	regions  godo.RegionsService
+	catalog  catalog
 
 	sleep   func(ctx context.Context, d time.Duration) error
 	dialSSH func(ctx context.Context, ip string) error
@@ -77,14 +72,18 @@ func New(token string) (*Provider, error) {
 		return nil, ErrNoToken
 	}
 	client := godo.NewFromToken(token)
-	return newProvider(client.Droplets, client.Regions), nil
+	return newProvider(client.Droplets, catalog{
+		regions: client.Regions,
+		sizes:   client.Sizes,
+		images:  client.Images,
+	}), nil
 }
 
 // newProvider applies the defaults shared by New and the tests.
-func newProvider(droplets godo.DropletsService, regions godo.RegionsService) *Provider {
+func newProvider(droplets godo.DropletsService, catalog catalog) *Provider {
 	return &Provider{
 		droplets:     droplets,
-		regions:      regions,
+		catalog:      catalog,
 		sleep:        sleep,
 		dialSSH:      dialSSH,
 		pollInterval: defaultPollInterval,

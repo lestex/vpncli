@@ -14,71 +14,113 @@ import (
 	"github.com/lestex/vpncli/internal/provider"
 )
 
-// fakeRegions stands in for godo.RegionsService. Like fakeDroplets it embeds
-// the interface rather than stubbing it, so an unexpected call panics.
-type fakeRegions struct {
-	godo.RegionsService
-
-	pages [][]godo.Region
-
-	// failures are replies served before the pages are, which is how a 429
-	// followed by a success is spelled out.
+// pager serves scripted pages to any of the catalog fakes. It records what was
+// asked for, and serves failures ahead of the pages so "429, then success" can
+// be spelled out.
+type pager[T any] struct {
+	pages    [][]T
 	failures []reply
 	err      error
 
 	requestedPages []int
 	perPage        int
-
-	slept []time.Duration
 }
 
-func (f *fakeRegions) List(_ context.Context, opt *godo.ListOptions) ([]godo.Region, *godo.Response, error) {
-	if f.err != nil {
-		return nil, nil, f.err
+func (p *pager[T]) next(opt *godo.ListOptions, path string) ([]T, *godo.Response, error) {
+	if p.err != nil {
+		return nil, nil, p.err
 	}
-	if len(f.failures) > 0 {
-		r := f.failures[0]
-		f.failures = f.failures[1:]
+	if len(p.failures) > 0 {
+		r := p.failures[0]
+		p.failures = p.failures[1:]
 		return nil, r.resp, r.err
 	}
 
-	f.requestedPages = append(f.requestedPages, opt.Page)
-	f.perPage = opt.PerPage
+	p.requestedPages = append(p.requestedPages, opt.Page)
+	p.perPage = opt.PerPage
 
 	idx := opt.Page - 1
-	if idx < 0 || idx >= len(f.pages) {
+	if idx < 0 || idx >= len(p.pages) {
 		return nil, &godo.Response{Links: &godo.Links{}}, nil
 	}
 
+	// A non-empty Next makes godo report "not the last page".
 	links := &godo.Links{}
-	if idx < len(f.pages)-1 {
-		links.Pages = &godo.Pages{Next: "https://api.digitalocean.com/v2/regions?page=2"}
+	if idx < len(p.pages)-1 {
+		links.Pages = &godo.Pages{Next: "https://api.digitalocean.com/v2/" + path + "?page=2"}
 	}
 
-	return f.pages[idx], &godo.Response{Links: links}, nil
+	return p.pages[idx], &godo.Response{Links: links}, nil
 }
 
-func (f *fakeRegions) sleep(_ context.Context, d time.Duration) error {
-	f.slept = append(f.slept, d)
-	return nil
+// The three fakes embed their godo interface rather than stubbing it, so a
+// method nothing should be calling panics instead of returning a zero value.
+type fakeRegions struct {
+	godo.RegionsService
+	pager[godo.Region]
 }
 
-// newTestCatalogProvider wires a provider to the fake regions service, with
-// waiting stubbed so a retry costs no real time.
-func newTestCatalogProvider(f *fakeRegions) *Provider {
-	p := newProvider(nil, f)
-	p.sleep = f.sleep
+func (f *fakeRegions) List(_ context.Context, opt *godo.ListOptions) ([]godo.Region, *godo.Response, error) {
+	return f.next(opt, "regions")
+}
+
+type fakeSizes struct {
+	godo.SizesService
+	pager[godo.Size]
+}
+
+func (f *fakeSizes) List(_ context.Context, opt *godo.ListOptions) ([]godo.Size, *godo.Response, error) {
+	return f.next(opt, "sizes")
+}
+
+type fakeImages struct {
+	godo.ImagesService
+	pager[godo.Image]
+
+	// listedAll records a call to List, which returns snapshots and one-click
+	// images alongside the distributions.
+	listedAll bool
+}
+
+func (f *fakeImages) ListDistribution(_ context.Context, opt *godo.ListOptions) ([]godo.Image, *godo.Response, error) {
+	return f.next(opt, "images")
+}
+
+func (f *fakeImages) List(_ context.Context, opt *godo.ListOptions) ([]godo.Image, *godo.Response, error) {
+	f.listedAll = true
+	return f.next(opt, "images")
+}
+
+// catalogProvider wires a provider to whichever catalog fakes a test supplies,
+// with waiting stubbed so a retry costs no real time.
+func catalogProvider(t *testing.T, c catalog) *Provider {
+	t.Helper()
+
+	p := newProvider(nil, c)
+	p.sleep = func(context.Context, time.Duration) error { return nil }
 	return p
 }
 
+func regionPages(pages ...[]godo.Region) *fakeRegions {
+	return &fakeRegions{pager: pager[godo.Region]{pages: pages}}
+}
+
+func sizePages(pages ...[]godo.Size) *fakeSizes {
+	return &fakeSizes{pager: pager[godo.Size]{pages: pages}}
+}
+
+func imagePages(pages ...[]godo.Image) *fakeImages {
+	return &fakeImages{pager: pager[godo.Image]{pages: pages}}
+}
+
 func TestListRegions(t *testing.T) {
-	f := &fakeRegions{pages: [][]godo.Region{{
+	f := regionPages([]godo.Region{
 		{Slug: "fra1", Name: "Frankfurt 1", Available: true},
 		{Slug: "ams3", Name: "Amsterdam 3", Available: true},
 		{Slug: "sfo1", Name: "San Francisco 1", Available: false},
-	}}}
+	})
 
-	got, err := newTestCatalogProvider(f).ListRegions(context.Background())
+	got, err := catalogProvider(t, catalog{regions: f}).ListRegions(context.Background())
 	if err != nil {
 		t.Fatalf("ListRegions: %v", err)
 	}
@@ -95,79 +137,222 @@ func TestListRegions(t *testing.T) {
 	}
 }
 
-func TestListRegionsPaginates(t *testing.T) {
-	f := &fakeRegions{pages: [][]godo.Region{
-		{{Slug: "nyc1", Name: "New York 1", Available: true}},
-		{{Slug: "ams3", Name: "Amsterdam 3", Available: true}},
-	}}
+func TestListSizes(t *testing.T) {
+	f := sizePages([]godo.Size{
+		{Slug: "s-1vcpu-2gb", Memory: 2048, Vcpus: 1, Disk: 50, PriceMonthly: 12, Available: true, Regions: []string{"fra1"}},
+		{Slug: "s-1vcpu-512mb-10gb", Memory: 512, Vcpus: 1, Disk: 10, PriceMonthly: 4, Available: true, Regions: []string{"fra1", "ams3"}},
+		{Slug: "s-1vcpu-1gb", Memory: 1024, Vcpus: 1, Disk: 25, PriceMonthly: 6, Available: false, Regions: []string{"fra1"}},
+	})
 
-	got, err := newTestCatalogProvider(f).ListRegions(context.Background())
+	got, err := catalogProvider(t, catalog{sizes: f}).ListSizes(context.Background())
 	if err != nil {
-		t.Fatalf("ListRegions: %v", err)
+		t.Fatalf("ListSizes: %v", err)
 	}
 
-	if len(got) != 2 {
-		t.Fatalf("got %d regions, want both pages: %+v", len(got), got)
+	want := []provider.Size{
+		{Slug: "s-1vcpu-512mb-10gb", VCPUs: 1, MemoryMB: 512, DiskGB: 10, PriceMonthly: 4, Available: true, Regions: []string{"fra1", "ams3"}},
+		{Slug: "s-1vcpu-1gb", VCPUs: 1, MemoryMB: 1024, DiskGB: 25, PriceMonthly: 6, Regions: []string{"fra1"}},
+		{Slug: "s-1vcpu-2gb", VCPUs: 1, MemoryMB: 2048, DiskGB: 50, PriceMonthly: 12, Available: true, Regions: []string{"fra1"}},
 	}
-	if want := []int{1, 2}; !reflect.DeepEqual(f.requestedPages, want) {
-		t.Errorf("requested pages %v, want %v", f.requestedPages, want)
-	}
-	if f.perPage != catalogPerPage {
-		t.Errorf("per page = %d, want %d", f.perPage, catalogPerPage)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListSizes() = %+v, want cheapest first: %+v", got, want)
 	}
 }
 
-func TestListRegionsEmpty(t *testing.T) {
-	got, err := newTestCatalogProvider(&fakeRegions{}).ListRegions(context.Background())
+// A menu whose order moves between runs would move the answers with it.
+func TestListSizesOrdersTiesBySlug(t *testing.T) {
+	f := sizePages([]godo.Size{
+		{Slug: "s-2vcpu-2gb", PriceMonthly: 18},
+		{Slug: "c-2", PriceMonthly: 18},
+		{Slug: "m-1vcpu-8gb", PriceMonthly: 18},
+	})
+
+	got, err := catalogProvider(t, catalog{sizes: f}).ListSizes(context.Background())
+	if err != nil {
+		t.Fatalf("ListSizes: %v", err)
+	}
+
+	want := []string{"c-2", "m-1vcpu-8gb", "s-2vcpu-2gb"}
+	for i, slug := range want {
+		if got[i].Slug != slug {
+			t.Errorf("size %d = %q, want %q (%+v)", i, got[i].Slug, slug, got)
+		}
+	}
+}
+
+func TestListImages(t *testing.T) {
+	f := imagePages([]godo.Image{
+		{Slug: "ubuntu-22-04-x64", Name: "22.04 (LTS) x64", Distribution: "Ubuntu"},
+		{Slug: "debian-12-x64", Name: "12 x64", Distribution: "Debian"},
+		{Slug: "ubuntu-24-04-x64", Name: "24.04 (LTS) x64", Distribution: "Ubuntu"},
+		{Slug: "debian-13-x64", Name: "13 x64", Distribution: "Debian"},
+	})
+
+	got, err := catalogProvider(t, catalog{images: f}).ListImages(context.Background())
+	if err != nil {
+		t.Fatalf("ListImages: %v", err)
+	}
+
+	// Grouped by distribution, newest first inside one.
+	want := []provider.Image{
+		{Slug: "debian-13-x64", Name: "13 x64", Distribution: "Debian"},
+		{Slug: "debian-12-x64", Name: "12 x64", Distribution: "Debian"},
+		{Slug: "ubuntu-24-04-x64", Name: "24.04 (LTS) x64", Distribution: "Ubuntu"},
+		{Slug: "ubuntu-22-04-x64", Name: "22.04 (LTS) x64", Distribution: "Ubuntu"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListImages() = %+v, want %+v", got, want)
+	}
+}
+
+// Snapshots and one-click images are a worse starting point than a stock OS,
+// so only the distribution listing is asked for.
+func TestListImagesAsksForDistributionsOnly(t *testing.T) {
+	f := imagePages([]godo.Image{{Slug: "ubuntu-24-04-x64", Distribution: "Ubuntu"}})
+
+	if _, err := catalogProvider(t, catalog{images: f}).ListImages(context.Background()); err != nil {
+		t.Fatalf("ListImages: %v", err)
+	}
+	if f.listedAll {
+		t.Error("ListImages asked for every image, want the distributions only")
+	}
+}
+
+func TestCatalogPaginates(t *testing.T) {
+	regions := regionPages(
+		[]godo.Region{{Slug: "nyc1", Available: true}},
+		[]godo.Region{{Slug: "ams3", Available: true}},
+	)
+	sizes := sizePages(
+		[]godo.Size{{Slug: "s-1vcpu-1gb", PriceMonthly: 6}},
+		[]godo.Size{{Slug: "s-1vcpu-512mb-10gb", PriceMonthly: 4}},
+	)
+	images := imagePages(
+		[]godo.Image{{Slug: "ubuntu-24-04-x64", Distribution: "Ubuntu"}},
+		[]godo.Image{{Slug: "debian-13-x64", Distribution: "Debian"}},
+	)
+	p := catalogProvider(t, catalog{regions: regions, sizes: sizes, images: images})
+	ctx := context.Background()
+
+	gotRegions, err := p.ListRegions(ctx)
 	if err != nil {
 		t.Fatalf("ListRegions: %v", err)
 	}
-	if len(got) != 0 {
-		t.Errorf("got %+v, want no regions", got)
+	gotSizes, err := p.ListSizes(ctx)
+	if err != nil {
+		t.Fatalf("ListSizes: %v", err)
+	}
+	gotImages, err := p.ListImages(ctx)
+	if err != nil {
+		t.Fatalf("ListImages: %v", err)
+	}
+
+	if len(gotRegions) != 2 || len(gotSizes) != 2 || len(gotImages) != 2 {
+		t.Fatalf("got %d regions, %d sizes, %d images, want both pages of each",
+			len(gotRegions), len(gotSizes), len(gotImages))
+	}
+
+	// The second page is only reachable if sorting happens after the walk.
+	if gotSizes[0].Slug != "s-1vcpu-512mb-10gb" {
+		t.Errorf("sizes = %+v, want the cheapest across both pages first", gotSizes)
+	}
+
+	want := []int{1, 2}
+	for _, tt := range []struct {
+		what  string
+		pages []int
+		per   int
+	}{
+		{"regions", regions.requestedPages, regions.perPage},
+		{"sizes", sizes.requestedPages, sizes.perPage},
+		{"images", images.requestedPages, images.perPage},
+	} {
+		if !reflect.DeepEqual(tt.pages, want) {
+			t.Errorf("%s requested pages %v, want %v", tt.what, tt.pages, want)
+		}
+		if tt.per != catalogPerPage {
+			t.Errorf("%s per page = %d, want %d", tt.what, tt.per, catalogPerPage)
+		}
+	}
+}
+
+func TestCatalogEmpty(t *testing.T) {
+	p := catalogProvider(t, catalog{regions: regionPages(), sizes: sizePages(), images: imagePages()})
+	ctx := context.Background()
+
+	regions, err := p.ListRegions(ctx)
+	if err != nil || len(regions) != 0 {
+		t.Errorf("ListRegions() = %+v, %v, want none", regions, err)
+	}
+	sizes, err := p.ListSizes(ctx)
+	if err != nil || len(sizes) != 0 {
+		t.Errorf("ListSizes() = %+v, %v, want none", sizes, err)
+	}
+	images, err := p.ListImages(ctx)
+	if err != nil || len(images) != 0 {
+		t.Errorf("ListImages() = %+v, %v, want none", images, err)
 	}
 }
 
 // A catalog lookup is as rate limited as anything else, and it is the first
 // call the wizard makes.
 func TestListRegionsRetriesRateLimit(t *testing.T) {
-	f := &fakeRegions{
-		failures: []reply{failure(http.StatusTooManyRequests, "2")},
-		pages:    [][]godo.Region{{{Slug: "fra1", Name: "Frankfurt 1", Available: true}}},
+	f := regionPages([]godo.Region{{Slug: "fra1", Name: "Frankfurt 1", Available: true}})
+	f.failures = []reply{failure(http.StatusTooManyRequests, "2")}
+
+	var slept []time.Duration
+	p := catalogProvider(t, catalog{regions: f})
+	p.sleep = func(_ context.Context, d time.Duration) error {
+		slept = append(slept, d)
+		return nil
 	}
 
-	got, err := newTestCatalogProvider(f).ListRegions(context.Background())
+	got, err := p.ListRegions(context.Background())
 	if err != nil {
 		t.Fatalf("ListRegions: %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("got %+v, want the region from the second attempt", got)
 	}
-	if want := []time.Duration{2 * time.Second}; !reflect.DeepEqual(f.slept, want) {
-		t.Errorf("slept %v, want %v (Retry-After)", f.slept, want)
+	if want := []time.Duration{2 * time.Second}; !reflect.DeepEqual(slept, want) {
+		t.Errorf("slept %v, want %v (Retry-After)", slept, want)
 	}
 }
 
-func TestListRegionsError(t *testing.T) {
-	f := &fakeRegions{err: errors.New("no route to host")}
+// Whichever lookup failed, the error has to say which one it was: the wizard
+// makes three in a row.
+func TestCatalogErrorsNameTheLookup(t *testing.T) {
+	boom := errors.New("no route to host")
+	ctx := context.Background()
 
-	_, err := newTestCatalogProvider(f).ListRegions(context.Background())
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	if !strings.Contains(err.Error(), "listing regions") {
-		t.Errorf("error %q does not say what failed", err)
-	}
-}
+	regions := regionPages()
+	regions.err = boom
+	sizes := sizePages()
+	sizes.err = boom
+	images := imagePages()
+	images.err = boom
+	p := catalogProvider(t, catalog{regions: regions, sizes: sizes, images: images})
 
-// Sizes and images have no wizard step yet, and saying so beats a nil slice
-// that looks like an account with nothing in it.
-func TestCatalogLookupsNotImplemented(t *testing.T) {
-	p := newTestCatalogProvider(&fakeRegions{})
-
-	if _, err := p.ListSizes(context.Background()); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("ListSizes error = %v, want ErrNotImplemented", err)
+	tests := []struct {
+		what string
+		call func() error
+	}{
+		{"regions", func() error { _, err := p.ListRegions(ctx); return err }},
+		{"sizes", func() error { _, err := p.ListSizes(ctx); return err }},
+		{"images", func() error { _, err := p.ListImages(ctx); return err }},
 	}
-	if _, err := p.ListImages(context.Background()); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("ListImages error = %v, want ErrNotImplemented", err)
+	for _, tt := range tests {
+		t.Run(tt.what, func(t *testing.T) {
+			err := tt.call()
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), "listing "+tt.what) {
+				t.Errorf("error %q does not say which lookup failed", err)
+			}
+			if !errors.Is(err, boom) {
+				t.Errorf("error %q does not wrap the cause", err)
+			}
+		})
 	}
 }

@@ -141,10 +141,10 @@ func (f *fakeDroplets) List(_ context.Context, opt *godo.ListOptions) ([]godo.Dr
 
 // newTestProvider wires a provider to the fake droplets service, with waiting
 // and dialing stubbed: a test must spend no real time and open no real
-// sockets. The regions service is left nil, since nothing on this path calls
-// it - catalog_test.go wires that half.
+// sockets. The catalog is left empty, since nothing on this path reads it -
+// catalog_test.go wires that half.
 func newTestProvider(f *fakeDroplets) *Provider {
-	p := newProvider(f, nil)
+	p := newProvider(f, catalog{})
 	p.sleep = f.sleep
 	p.dialSSH = f.dial
 	return p

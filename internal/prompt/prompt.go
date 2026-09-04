@@ -24,6 +24,9 @@ var ErrNoInput = errors.New("no input: nothing was chosen")
 // Option is one choice. Key is the value that ends up in the config file, and
 // is accepted as an answer in its own right, so a list that has scrolled off
 // the screen can still be answered.
+//
+// A tab in Label starts another column, aligned down the whole list along with
+// the numbers and the keys.
 type Option struct {
 	Key   string
 	Label string

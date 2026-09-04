@@ -331,13 +331,30 @@ vpncli connect 3 --qr
 ```
 
 For a desktop, `--sing-box` writes a sing-box config instead - a SOCKS and HTTP
-proxy on `127.0.0.1:1080`, which needs no privileges and is what a browser
-wants:
+proxy on `127.0.0.1:1080`, which needs no privileges:
 
 ```sh
 vpncli connect 3 --sing-box > vpn.json
 sing-box run -c vpn.json
 ```
+
+A proxy only carries what is pointed at it, so a browser has to be told about
+it (Firefox: Settings, Network Settings, Manual, SOCKS v5 `127.0.0.1:1080`, and
+tick "Proxy DNS when using SOCKS v5"), or macOS has to be, under Network,
+Details, Proxies.
+
+For the whole machine instead, `--tun` writes a config that creates a network
+interface and routes everything through it - programs with no proxy setting
+included, and DNS with them. Creating an interface and rewriting the routing
+table needs root:
+
+```sh
+vpncli connect 3 --tun > vpn.json
+sudo sing-box run -c vpn.json
+```
+
+Both carry the same tunnel and the same credentials; the difference is only
+where traffic enters it.
 
 None of this calls an API or opens an SSH connection. Everything a client needs
 was recorded when the server was bootstrapped, so `connect` works offline and

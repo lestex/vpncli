@@ -15,6 +15,7 @@ func newConnectCommand() *cobra.Command {
 	var (
 		asQR      bool
 		asSingBox bool
+		asTun     bool
 	)
 
 	cmd := &cobra.Command{
@@ -32,6 +33,13 @@ without going through anything that keeps a copy.
 
 ` + "`--sing-box`" + ` writes a sing-box config instead: a SOCKS and HTTP proxy on
 127.0.0.1:` + strconv.Itoa(client.SocksPort) + `, which needs no privileges and is what a browser wants.
+Only what is pointed at it goes through the tunnel.
+
+Add ` + "`--tun`" + ` for the whole machine instead. That config creates a network
+interface and routes everything through it, including programs that have no
+proxy setting, and DNS with it. It has to run as root:
+
+    sudo sing-box run -c vpn.json
 
 No API call and no SSH: everything here was recorded when the server was
 bootstrapped, so this works offline and needs no token.`,
@@ -41,20 +49,27 @@ bootstrapped, so this works offline and needs no token.`,
 			if err != nil {
 				return fmt.Errorf("%q is not a server id: `vpncli list` shows them", args[0])
 			}
-			if asQR && asSingBox {
+			if asQR && (asSingBox || asTun) {
 				return fmt.Errorf("--qr and --sing-box are two different things to print: pick one")
 			}
-			return runConnect(cmd.Context(), cmd.OutOrStdout(), id, asQR, asSingBox)
+			mode := client.Proxy
+			if asTun {
+				// --tun is only meaningful for a sing-box config, so it says
+				// which one to write rather than needing both flags.
+				asSingBox, mode = true, client.Tun
+			}
+			return runConnect(cmd.Context(), cmd.OutOrStdout(), id, asQR, asSingBox, mode)
 		},
 	}
 
 	cmd.Flags().BoolVar(&asQR, "qr", false, "draw the link as a QR code")
-	cmd.Flags().BoolVar(&asSingBox, "sing-box", false, "print a sing-box config")
+	cmd.Flags().BoolVar(&asSingBox, "sing-box", false, "print a sing-box config (a loopback proxy)")
+	cmd.Flags().BoolVar(&asTun, "tun", false, "make that config route the whole machine, as root")
 	return cmd
 }
 
 // runConnect prints one server's client config.
-func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bool) error {
+func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bool, mode client.Mode) error {
 	store, err := openStore()
 	if err != nil {
 		return err
@@ -67,7 +82,7 @@ func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bo
 	}
 
 	if asSingBox {
-		config, err := client.SingBox(srv)
+		config, err := client.SingBox(srv, mode)
 		if err != nil {
 			return err
 		}

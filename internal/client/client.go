@@ -24,10 +24,39 @@ import (
 // question the wizard asks.
 const Fingerprint = "chrome"
 
-// SocksPort is where a generated sing-box config listens. It is on loopback
-// and above 1024, so the client needs no privileges and nothing else on the
-// network can reach it.
+// SocksPort is where a generated sing-box config listens in proxy mode. It is
+// on loopback and above 1024, so the client needs no privileges and nothing
+// else on the network can reach it.
 const SocksPort = 1080
+
+// Mode is how a generated config carries traffic.
+type Mode int
+
+const (
+	// Proxy listens on loopback and tunnels whatever is pointed at it. It
+	// needs no privileges, and it tunnels nothing that is not configured to
+	// use it - which is either the whole point or the whole problem,
+	// depending on what you are doing.
+	Proxy Mode = iota
+	// Tun creates a virtual interface and routes the machine's traffic
+	// through it, including from programs that have no proxy setting. It
+	// needs root, because creating an interface and rewriting the routing
+	// table does.
+	Tun
+)
+
+// Tunnel addresses for Tun mode. They are private ranges chosen not to collide
+// with anything ordinary: the /30 and /126 are as small as an interface with
+// one address on each side can be.
+var (
+	tunIPv4 = "172.19.0.1/30"
+	tunIPv6 = "fdfe:dcba:9876::1/126"
+)
+
+// tunResolver is where Tun mode sends DNS, through the tunnel. Left to the
+// system, lookups would go out over the local network in plain sight and undo
+// most of the point of tunneling the traffic that follows them.
+const tunResolver = "1.1.1.1"
 
 // ErrNotConfigured is returned for a server whose bootstrap has not run. There
 // is nothing to connect to yet, and the fix is a command rather than an edit.
@@ -79,12 +108,72 @@ func usable(srv state.Server) error {
 	return nil
 }
 
+// inbound is where traffic comes in, which is the whole difference between
+// the two modes.
+func inbound(mode Mode) any {
+	if mode == Tun {
+		return singBoxTunInbound{
+			Type:        "tun",
+			Tag:         "tun-in",
+			Address:     []string{tunIPv4, tunIPv6},
+			AutoRoute:   true,
+			StrictRoute: true,
+			// gvisor is a userspace network stack: slower than handing packets
+			// to the kernel, and it does not need the privileges or the
+			// per-platform care that the system stack does.
+			Stack: "gvisor",
+		}
+	}
+	return singBoxInbound{
+		// "mixed" is SOCKS and HTTP on the same port, which between them cover
+		// everything that takes a proxy setting.
+		Type:       "mixed",
+		Tag:        "in",
+		Listen:     "127.0.0.1",
+		ListenPort: SocksPort,
+	}
+}
+
 // singBoxConfig is the shape sing-box reads. Only the fields that matter are
 // here: a config with less in it is a config with less to be wrong.
 type singBoxConfig struct {
-	Log       singBoxLog       `json:"log"`
-	Inbounds  []singBoxInbound `json:"inbounds"`
-	Outbounds []any            `json:"outbounds"`
+	Log       singBoxLog    `json:"log"`
+	DNS       *singBoxDNS   `json:"dns,omitempty"`
+	Inbounds  []any         `json:"inbounds"`
+	Outbounds []any         `json:"outbounds"`
+	Route     *singBoxRoute `json:"route,omitempty"`
+}
+
+// singBoxTunInbound is the virtual interface Tun mode creates.
+type singBoxTunInbound struct {
+	Type    string   `json:"type"`
+	Tag     string   `json:"tag"`
+	Address []string `json:"address"`
+	// AutoRoute writes the routes that send traffic here; StrictRoute keeps
+	// it from leaking back out of the interface it came from.
+	AutoRoute   bool   `json:"auto_route"`
+	StrictRoute bool   `json:"strict_route"`
+	Stack       string `json:"stack"`
+}
+
+type singBoxDNS struct {
+	Servers []singBoxDNSServer `json:"servers"`
+}
+
+type singBoxDNSServer struct {
+	Type   string `json:"type"`
+	Tag    string `json:"tag"`
+	Server string `json:"server"`
+	// Detour sends the lookups through the tunnel rather than the local
+	// network, where they would be the one thing still in plain sight.
+	Detour string `json:"detour"`
+}
+
+type singBoxRoute struct {
+	// AutoDetectInterface is what keeps the connection to the server itself
+	// outside the tunnel it carries. Without it the tunnel routes its own
+	// traffic into itself.
+	AutoDetectInterface bool `json:"auto_detect_interface"`
 }
 
 type singBoxLog struct {
@@ -133,25 +222,17 @@ type singBoxDirect struct {
 
 // SingBox renders a sing-box config for one server.
 //
-// It listens as a SOCKS and HTTP proxy on loopback rather than creating a tun
-// device: a proxy needs no root, and pointing one browser at it is the usual
-// reason to want a config at all. Someone who wants the whole machine tunneled
-// can swap the inbound for a tun one.
-func SingBox(srv state.Server) ([]byte, error) {
+// Proxy mode listens on loopback and needs no privileges, but tunnels only
+// what is pointed at it. Tun mode creates an interface and routes everything,
+// including programs with no proxy setting, and has to run as root.
+func SingBox(srv state.Server, mode Mode) ([]byte, error) {
 	if err := usable(srv); err != nil {
 		return nil, err
 	}
 
 	config := singBoxConfig{
-		Log: singBoxLog{Level: "warn"},
-		Inbounds: []singBoxInbound{{
-			// "mixed" is SOCKS and HTTP on the same port, which between them
-			// cover everything that takes a proxy setting.
-			Type:       "mixed",
-			Tag:        "in",
-			Listen:     "127.0.0.1",
-			ListenPort: SocksPort,
-		}},
+		Log:      singBoxLog{Level: "warn"},
+		Inbounds: []any{inbound(mode)},
 		Outbounds: []any{
 			singBoxOutbound{
 				Type:       "vless",
@@ -176,6 +257,19 @@ func SingBox(srv state.Server) ([]byte, error) {
 			},
 			singBoxDirect{Type: "direct", Tag: "direct"},
 		},
+	}
+
+	if mode == Tun {
+		// Only Tun needs these. A proxy carries what is handed to it and
+		// resolves nothing on its own, so DNS and routing stay the system's
+		// business.
+		config.DNS = &singBoxDNS{Servers: []singBoxDNSServer{{
+			Type:   "udp",
+			Tag:    "tunnel-dns",
+			Server: tunResolver,
+			Detour: "proxy",
+		}}}
+		config.Route = &singBoxRoute{AutoDetectInterface: true}
 	}
 
 	rendered, err := json.MarshalIndent(config, "", "  ")

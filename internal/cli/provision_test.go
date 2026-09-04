@@ -153,7 +153,7 @@ func provisionWith(t *testing.T, vps *fakeProvider, cfg config.Config, dial dial
 
 	var out bytes.Buffer
 	err := runProvision(context.Background(), &out,
-		func(config.Config) (provider.VPSProvider, error) { return vps, nil }, dial)
+		func(config.Config) (provider.VPSProvider, error) { return vps, nil }, dial, checksOut)
 	return out.String(), err
 }
 

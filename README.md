@@ -36,6 +36,11 @@ the only place they exist is the server and the local state file.
 a SHA256 that is a constant in the source. Nothing is piped from a URL into a
 root shell, and two servers provisioned a week apart are the same server.
 
+**The camouflage site is measured, not assumed.** REALITY can only relay a
+handshake that fits in 8192 bytes, and several of the most obvious sites to
+hide behind no longer do. Picking one is a checked decision rather than a
+matter of taste - see [the wizard](#usage).
+
 ## Install
 
 Requires Go 1.25+.
@@ -150,6 +155,15 @@ The menus are filtered on purpose, and each filter is a decision:
   both `dest` and `server_names`. The offered ones are large, CDN-fronted and
   unremarkable; anything else can be typed. A good pick is near the server and
   boring to be seen talking to.
+
+  Whatever is chosen is then checked, because not every big site can be hidden
+  behind. REALITY relays the site's own TLS handshake to the client through an
+  8192 byte buffer, and a site whose certificate, OCSP staple and timestamps
+  come to more than that produces the nastiest failure this program has: every
+  client authenticates successfully and then dies at the handshake, with the
+  server logging nothing but a stranger being turned away. `www.microsoft.com`
+  is such a site. The check measures the certificate, and TLS 1.3 and HTTP/2
+  along with it, before the answer is written.
 
 Answer the region and the rest can be taken on the Enter key: the defaults are
 the cheapest size in that region and the newest Ubuntu.

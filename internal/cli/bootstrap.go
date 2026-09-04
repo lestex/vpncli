@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -56,13 +57,13 @@ inside the server and logged by the provider, so the keys go over SSH instead.`,
 			if err != nil {
 				return fmt.Errorf("%q is not a server id: `vpncli list` shows them", args[0])
 			}
-			return runBootstrapCommand(cmd.Context(), cmd.OutOrStdout(), dialSSH, id)
+			return runBootstrapCommand(cmd.Context(), cmd.OutOrStdout(), dialSSH, reality.Check, id)
 		},
 	}
 }
 
 // runBootstrapCommand configures one server by local id.
-func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, id int64) error {
+func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, check checkFunc, id int64) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -85,7 +86,7 @@ func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, id i
 	fmt.Fprintf(out, "Configuring %s (%s)...\n", srv.Name, srv.IPv4)
 
 	spin := startSpinner(out, "connecting")
-	err = bootstrapServer(ctx, store, cfg, srv, dial, spin.say)
+	err = bootstrapServer(ctx, store, cfg, srv, dial, check, spin.say)
 	spin.stop()
 	if err != nil {
 		return err
@@ -94,7 +95,7 @@ func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, id i
 	fmt.Fprintf(out, "ready in %s\n", took(spin.elapsed()))
 	fmt.Fprintf(out, "\n%s is serving VLESS+REALITY on %s:%d, camouflaged as %s.\n",
 		srv.Name, srv.IPv4, bootstrap.Port, cfg.Reality.Host())
-	fmt.Fprintf(out, "Building a client config from it is `vpncli connect`, which lands in v0.9.0.\n")
+	fmt.Fprintf(out, "`vpncli connect %d` prints the link to reach it with.\n", srv.ID)
 	return nil
 }
 
@@ -105,10 +106,18 @@ func runBootstrapCommand(ctx context.Context, out io.Writer, dial dialFunc, id i
 // that failed halfway leaves the row unconfigured, which is exactly right: the
 // next attempt generates fresh material rather than trying to work out what
 // reached the server and what did not.
-func bootstrapServer(ctx context.Context, store *state.Store, cfg config.Config, srv state.Server, dial dialFunc, progress bootstrap.Progress) error {
+func bootstrapServer(ctx context.Context, store *state.Store, cfg config.Config, srv state.Server, dial dialFunc, check checkFunc, progress bootstrap.Progress) error {
 	host := cfg.Reality.Host()
 	if host == "" {
 		return fmt.Errorf("config has no camouflage: run `vpncli init`")
+	}
+
+	// The wizard checks this too, but a config can be edited by hand and a
+	// site can grow a longer certificate between one server and the next. A
+	// server built on a site REALITY cannot relay looks perfectly healthy and
+	// refuses every client, so it is worth one TLS connection to find out now.
+	if _, err := check(ctx, host); errors.Is(err, reality.ErrUnsuitable) {
+		return fmt.Errorf("%w: run `vpncli init` and pick another", err)
 	}
 
 	client, err := dial(ctx, ssh.Config{

@@ -199,10 +199,20 @@ vpncli provision
 
 ```
 Creating vpncli-fra1-7d3a91 (s-1vcpu-1gb, fra1) on digitalocean...
+⠹ waiting for the server to be ready (38s)
+```
+
+```
+Creating vpncli-fra1-7d3a91 (s-1vcpu-1gb, fra1) on digitalocean...
+ready in 52s
 
 ID  NAME                REGION  SIZE         IMAGE             IPV4          STATUS  AGE
 3   vpncli-fra1-7d3a91  fra1    s-1vcpu-1gb  ubuntu-24-04-x64  203.0.113.10  active  just now
 ```
+
+Booting takes about a minute, so the wait spins rather than sitting silent.
+Redirected into a pipe or a file it draws nothing, and neither does a terminal
+that says it is `dumb`.
 
 The row is written as soon as the provider accepts the request, before the wait
 for the server to boot. That ordering is deliberate: a server that exists but is

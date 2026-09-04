@@ -65,7 +65,12 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc) error {
 
 	fmt.Fprintf(out, "Creating %s (%s, %s) on %s...\n", opts.Name, opts.Size, opts.Region, vps.Name())
 
+	// Booting takes a minute or so, and a command that prints nothing for a
+	// minute looks like one that has hung.
+	spin := startSpinner(out, "waiting for the server to be ready")
 	srv, err := manager.New(vps, store).Provision(ctx, opts)
+	spin.stop()
+
 	if err != nil {
 		// A wait that failed still leaves a server running and recorded. Its
 		// id is how it gets cleaned up, and saying so here is cheaper than
@@ -76,7 +81,7 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc) error {
 		return err
 	}
 
-	fmt.Fprintln(out)
+	fmt.Fprintf(out, "ready in %s\n\n", took(spin.elapsed()))
 	return printServers(out, []state.Server{srv})
 }
 

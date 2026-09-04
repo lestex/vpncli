@@ -16,12 +16,13 @@ import (
 // fullConfig is what a completed wizard leaves behind.
 func fullConfig() config.Config {
 	return config.Config{
-		Provider:  digitalocean.Name,
-		Region:    "fra1",
-		Size:      "s-1vcpu-1gb",
-		Image:     "ubuntu-24-04-x64",
-		SSHKeyIDs: []string{"11"},
-		Reality:   config.Camouflage("www.apple.com"),
+		Provider:   digitalocean.Name,
+		Region:     "fra1",
+		Size:       "s-1vcpu-1gb",
+		Image:      "ubuntu-24-04-x64",
+		SSHKeyIDs:  []string{"11"},
+		SSHKeyPath: "~/.ssh/id_ed25519",
+		Reality:    config.Camouflage("www.apple.com"),
 	}
 }
 
@@ -48,7 +49,7 @@ func TestProvisionWithNoConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for an empty config")
 	}
-	for _, want := range []string{"region", "size", "image", "ssh key", "vpncli init"} {
+	for _, want := range []string{"region", "size", "image", "ssh key", "camouflage", "vpncli init"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
@@ -134,9 +135,14 @@ func TestProvisionHelpSaysWhatItDoesNotDoYet(t *testing.T) {
 	}
 }
 
-// provision runs the command against a fake provider and a real state store,
-// with config and state pointed at temporary directories.
+// provision runs the command against a fake provider and a fake server, with
+// config and state pointed at temporary directories.
 func provision(t *testing.T, vps *fakeProvider, cfg config.Config) (string, error) {
+	t.Helper()
+	return provisionWith(t, vps, cfg, dialing(newFakeSSH(), nil))
+}
+
+func provisionWith(t *testing.T, vps *fakeProvider, cfg config.Config, dial dialFunc) (string, error) {
 	t.Helper()
 	withStateDir(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -147,7 +153,7 @@ func provision(t *testing.T, vps *fakeProvider, cfg config.Config) (string, erro
 
 	var out bytes.Buffer
 	err := runProvision(context.Background(), &out,
-		func(config.Config) (provider.VPSProvider, error) { return vps, nil })
+		func(config.Config) (provider.VPSProvider, error) { return vps, nil }, dial)
 	return out.String(), err
 }
 
@@ -220,5 +226,58 @@ func TestProvisionRecordsNothingWhenCreateFails(t *testing.T) {
 	}
 	if servers := storedServers(t); len(servers) != 0 {
 		t.Errorf("state holds %+v, want nothing", servers)
+	}
+}
+
+// The point of provision is a server that works, so it configures what it
+// creates rather than handing back something half done.
+func TestProvisionBootstrapsWhatItCreates(t *testing.T) {
+	vps := testProvider()
+	vps.ready = provider.VPSInstance{
+		ID:       "1001",
+		Provider: digitalocean.Name,
+		IPv4:     "203.0.113.10",
+		Status:   provider.StatusActive,
+	}
+	f := newFakeSSH()
+
+	out, err := provisionWith(t, vps, fullConfig(), dialing(f, nil))
+	if err != nil {
+		t.Fatalf("runProvision: %v", err)
+	}
+
+	srv := storedServers(t)[0]
+	if !srv.Bootstrapped() {
+		t.Error("provision left the server unconfigured")
+	}
+	if !strings.Contains(out, "VLESS+REALITY") {
+		t.Errorf("the command does not say what the server is now:\n%s", out)
+	}
+	if _, ok := f.uploads["/usr/local/etc/xray/config.json"]; !ok {
+		t.Error("no server config reached the server")
+	}
+}
+
+// The server exists and bills whether or not it was configured, so a failure
+// here has to point at the command that finishes the job.
+func TestProvisionPointsAtBootstrapWhenConfiguringFails(t *testing.T) {
+	vps := testProvider()
+	vps.ready = provider.VPSInstance{ID: "1001", Provider: digitalocean.Name, IPv4: "203.0.113.10", Status: provider.StatusActive}
+
+	f := newFakeSSH()
+	f.failOn = "apt-get"
+	f.failErr = errors.New("dpkg was interrupted")
+
+	out, err := provisionWith(t, vps, fullConfig(), dialing(f, nil))
+	if err == nil {
+		t.Fatal("expected the bootstrap failure to come back")
+	}
+	if !strings.Contains(out, "vpncli bootstrap") {
+		t.Errorf("nothing says how to finish the server:\n%s", out)
+	}
+
+	srv := storedServers(t)[0]
+	if srv.Bootstrapped() {
+		t.Error("a failed bootstrap marked the server configured")
 	}
 }

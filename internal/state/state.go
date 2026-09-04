@@ -39,6 +39,41 @@ type Server struct {
 	Status     string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+
+	// Credentials is what the bootstrap generated. Zero until it has run.
+	Credentials Credentials
+	// SSHHostKey is the key this server presented the first time we connected,
+	// in authorized_keys form. Empty until then.
+	SSHHostKey string
+	// BootstrappedAt is when the server was configured. Zero means it is not.
+	BootstrappedAt time.Time
+}
+
+// Bootstrapped reports whether this server has been configured.
+func (s Server) Bootstrapped() bool { return !s.BootstrappedAt.IsZero() }
+
+// Credentials is everything a client needs to reach one server. It is
+// generated during the bootstrap and stored nowhere else: the provider does
+// not know it, and it is not in config.yaml, which describes the next server
+// rather than any particular one.
+type Credentials struct {
+	// UUID identifies the single VLESS client this server accepts.
+	UUID string
+	// PrivateKey stays on the server; PublicKey is what a client presents.
+	// Both are base64url, the form Xray reads and writes.
+	PrivateKey string
+	PublicKey  string
+	// ShortID is the pre-shared hex string a client sends with the handshake.
+	ShortID string
+	// Dest and ServerName are the camouflage this server was configured with,
+	// which a client has to match exactly.
+	Dest       string
+	ServerName string
+}
+
+// Complete reports whether these credentials can build a client config.
+func (c Credentials) Complete() bool {
+	return c.UUID != "" && c.PublicKey != "" && c.ShortID != "" && c.ServerName != ""
 }
 
 // Store is a handle on the state database.
@@ -76,7 +111,57 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("applying schema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+// addedColumns are the columns that arrived after the first release. The
+// schema file only creates a table that is missing, so a database made by an
+// older version keeps its original shape and has to be widened here.
+var addedColumns = []struct{ name, definition string }{
+	{"uuid", "TEXT NOT NULL DEFAULT ''"},
+	{"reality_private_key", "TEXT NOT NULL DEFAULT ''"},
+	{"reality_public_key", "TEXT NOT NULL DEFAULT ''"},
+	{"reality_short_id", "TEXT NOT NULL DEFAULT ''"},
+	{"reality_dest", "TEXT NOT NULL DEFAULT ''"},
+	{"reality_server_name", "TEXT NOT NULL DEFAULT ''"},
+	{"ssh_host_key", "TEXT NOT NULL DEFAULT ''"},
+	{"bootstrapped_at", "TIMESTAMP"},
+}
+
+// migrate adds whatever the servers table is missing. Every column added here
+// has a default, so an existing row stays valid without being rewritten.
+func migrate(db *sql.DB) error {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info('servers')`)
+	if err != nil {
+		return fmt.Errorf("reading the servers table: %w", err)
+	}
+	defer rows.Close()
+
+	have := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("reading the servers table: %w", err)
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reading the servers table: %w", err)
+	}
+
+	for _, column := range addedColumns {
+		if have[column.name] {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE servers ADD COLUMN ` + column.name + ` ` + column.definition); err != nil {
+			return fmt.Errorf("adding column %s: %w", column.name, err)
+		}
+	}
+	return nil
 }
 
 // Close releases the database handle.
@@ -165,6 +250,44 @@ func (s *Store) Update(ctx context.Context, srv Server) error {
 	return checkAffected(res, srv.ID)
 }
 
+// SaveHostKey records the SSH host key a server presented, in authorized_keys
+// form. It is written on the first connection and checked on every later one,
+// so a server that starts answering with a different key is a question rather
+// than a shrug.
+func (s *Store) SaveHostKey(ctx context.Context, id int64, hostKey string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE servers
+		   SET ssh_host_key = ?, updated_at = ?
+		 WHERE id = ?`,
+		hostKey, time.Now().UTC(), id)
+	if err != nil {
+		return fmt.Errorf("recording the host key of server %d: %w", id, err)
+	}
+	return checkAffected(res, id)
+}
+
+// SaveBootstrap records what a finished bootstrap produced, and marks the
+// server configured.
+//
+// It is written once, at the end. A bootstrap that failed halfway leaves the
+// row unmarked and its credentials empty, which is exactly right: re-running
+// it generates fresh material and replaces whatever reached the server, so
+// there is never a half-written set of keys to reconcile.
+func (s *Store) SaveBootstrap(ctx context.Context, id int64, c Credentials) error {
+	now := time.Now().UTC()
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE servers
+		   SET uuid = ?, reality_private_key = ?, reality_public_key = ?,
+		       reality_short_id = ?, reality_dest = ?, reality_server_name = ?,
+		       bootstrapped_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		c.UUID, c.PrivateKey, c.PublicKey, c.ShortID, c.Dest, c.ServerName, now, now, id)
+	if err != nil {
+		return fmt.Errorf("recording the bootstrap of server %d: %w", id, err)
+	}
+	return checkAffected(res, id)
+}
+
 // Delete removes a server row by local id.
 func (s *Store) Delete(ctx context.Context, id int64) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM servers WHERE id = ?`, id)
@@ -174,7 +297,9 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 	return checkAffected(res, id)
 }
 
-const selectColumns = `SELECT id, provider, provider_id, name, region, size, image, ipv4, status, created_at, updated_at`
+const selectColumns = `SELECT id, provider, provider_id, name, region, size, image, ipv4, status, created_at, updated_at,
+       uuid, reality_private_key, reality_public_key, reality_short_id, reality_dest, reality_server_name,
+       ssh_host_key, bootstrapped_at`
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
 type scanner interface {
@@ -183,14 +308,22 @@ type scanner interface {
 
 func scanServer(sc scanner) (Server, error) {
 	var srv Server
+	// A server that has never been bootstrapped has no timestamp, so this one
+	// column is nullable where the rest carry defaults.
+	var bootstrappedAt sql.NullTime
+
 	err := sc.Scan(&srv.ID, &srv.Provider, &srv.ProviderID, &srv.Name, &srv.Region,
-		&srv.Size, &srv.Image, &srv.IPv4, &srv.Status, &srv.CreatedAt, &srv.UpdatedAt)
+		&srv.Size, &srv.Image, &srv.IPv4, &srv.Status, &srv.CreatedAt, &srv.UpdatedAt,
+		&srv.Credentials.UUID, &srv.Credentials.PrivateKey, &srv.Credentials.PublicKey,
+		&srv.Credentials.ShortID, &srv.Credentials.Dest, &srv.Credentials.ServerName,
+		&srv.SSHHostKey, &bootstrappedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Server{}, err
 		}
 		return Server{}, fmt.Errorf("scanning server row: %w", err)
 	}
+	srv.BootstrappedAt = bootstrappedAt.Time
 	return srv, nil
 }
 

@@ -22,6 +22,7 @@ time.`,
 	}
 
 	root.AddCommand(
+		newBootstrapCommand(),
 		newDestroyCommand(),
 		newInitCommand(),
 		newListCommand(),

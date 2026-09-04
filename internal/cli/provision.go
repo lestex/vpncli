@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lestex/vpncli/internal/bootstrap"
 	"github.com/lestex/vpncli/internal/config"
 	"github.com/lestex/vpncli/internal/manager"
 	"github.com/lestex/vpncli/internal/provider"
@@ -33,7 +34,7 @@ Installing Xray-core and the REALITY camouflage is v0.8.0.
 Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runProvision(cmd.Context(), cmd.OutOrStdout(), openProvider)
+			return runProvision(cmd.Context(), cmd.OutOrStdout(), openProvider, dialSSH)
 		},
 	}
 }
@@ -41,7 +42,7 @@ Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 // runProvision creates one server and reports it. The provider is opened
 // through a func so a test can walk the whole path without a token, which is
 // the only way to exercise what happens when a create half succeeds.
-func runProvision(ctx context.Context, out io.Writer, open openFunc) error {
+func runProvision(ctx context.Context, out io.Writer, open openFunc, dial dialFunc) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -67,7 +68,7 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc) error {
 
 	// Booting takes a minute or so, and a command that prints nothing for a
 	// minute looks like one that has hung.
-	spin := startSpinner(out, "waiting for the server to be ready")
+	spin := startSpinner(out, "waiting for the server to boot")
 	srv, err := manager.New(vps, store).Provision(ctx, opts)
 	spin.stop()
 
@@ -81,8 +82,25 @@ func runProvision(ctx context.Context, out io.Writer, open openFunc) error {
 		return err
 	}
 
+	// The server exists; now it has to be made into something worth having.
+	// Its row is already written, so a bootstrap that fails leaves a server
+	// `vpncli bootstrap` can finish rather than one to throw away.
+	spin = startSpinner(out, "connecting")
+	err = bootstrapServer(ctx, store, cfg, srv, dial, spin.say)
+	spin.stop()
+	if err != nil {
+		fmt.Fprintf(out, "the server is up but not configured: `vpncli bootstrap %d` tries again\n", srv.ID)
+		return err
+	}
+
 	fmt.Fprintf(out, "ready in %s\n\n", took(spin.elapsed()))
-	return printServers(out, []state.Server{srv})
+	if err := printServers(out, []state.Server{srv}); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "\nServing VLESS+REALITY on %s:%d, camouflaged as %s.\n",
+		srv.IPv4, bootstrap.Port, cfg.Reality.Host())
+	return nil
 }
 
 // createOptions turns the config into one create request, naming whatever the
@@ -98,6 +116,7 @@ func createOptions(cfg config.Config) (provider.CreateOptions, error) {
 		{"size", cfg.Size == ""},
 		{"image", cfg.Image == ""},
 		{"ssh key", len(cfg.SSHKeyIDs) == 0},
+		{"camouflage", cfg.Reality.Host() == ""},
 	} {
 		if field.empty {
 			missing = append(missing, field.name)

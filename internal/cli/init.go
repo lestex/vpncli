@@ -6,6 +6,8 @@ import (
 	"io"
 	"math"
 	"net"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -103,6 +105,12 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) er
 	}
 	cfg.SSHKeyIDs = keys
 
+	keyPath, err := askSSHKeyPath(ctx, p, cfg.SSHKeyPath, keyName)
+	if err != nil {
+		return err
+	}
+	cfg.SSHKeyPath = keyPath
+
 	// Camouflage is the one question with no API behind it, so it is asked
 	// last: everything that can fail on a token has already failed by here.
 	host, err := selectCamouflage(ctx, p, cfg.Reality.Host())
@@ -121,6 +129,7 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, open openFunc) er
 	p.Printf("  size       %s\n", cfg.Size)
 	p.Printf("  image      %s\n", cfg.Image)
 	p.Printf("  ssh key    %s\n", sshKeySummary(keyName, cfg.SSHKeyIDs))
+	p.Printf("  key file   %s\n", cfg.SSHKeyPath)
 	p.Printf("  camouflage %s\n", cfg.Reality.Dest)
 	p.Printf("\nThat is everything a server needs. Create one with `vpncli provision`.\n")
 
@@ -319,6 +328,73 @@ func configuredKeyName(keys []provider.SSHKey, current []string) string {
 		}
 	}
 	return ""
+}
+
+// defaultKeyPaths are where a private key usually is, newest algorithm first.
+// The wizard offers the first one that exists, so the common case is answered
+// by pressing Enter.
+var defaultKeyPaths = []string{"~/.ssh/id_ed25519", "~/.ssh/id_rsa"}
+
+// askSSHKeyPath asks where the private half of the chosen key is.
+//
+// The bootstrap logs in with it. A file that is not there is not refused: an
+// agent may be holding the key, which is also the answer for a key with a
+// passphrase, so the wizard says what it found and takes the answer either way.
+func askSSHKeyPath(ctx context.Context, p *prompt.Prompter, current, keyName string) (string, error) {
+	p.Printf("\nThe bootstrap logs in with the private half of %s.\n\n", keyName)
+
+	answer, err := p.Input(ctx, "Key file", defaultOf(current, keyPathOptions()))
+	if err != nil {
+		return "", err
+	}
+
+	path, err := expandHome(answer)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(path); err != nil {
+		// Worth saying, not worth refusing: an agent holding the key is a
+		// perfectly good answer, and is the only one for a key with a
+		// passphrase.
+		p.Printf("There is no file at %s. If your agent holds the key that is fine;\n", path)
+		p.Printf("otherwise `vpncli bootstrap` will not be able to log in.\n")
+	}
+	return answer, nil
+}
+
+// keyPathOptions is the default list as menu options, so defaultOf can pick
+// the first that exists.
+func keyPathOptions() []prompt.Option {
+	var options []prompt.Option
+	for _, path := range defaultKeyPaths {
+		expanded, err := expandHome(path)
+		if err != nil || !exists(expanded) {
+			continue
+		}
+		options = append(options, prompt.Option{Key: path})
+	}
+	if len(options) == 0 {
+		options = append(options, prompt.Option{Key: defaultKeyPaths[0]})
+	}
+	return options
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// expandHome resolves a leading ~, which is how a key path is written and is
+// not something the shell expanded for us here.
+func expandHome(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expanding %s: %w", path, err)
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~")), nil
 }
 
 // camouflageSites are the sites offered as REALITY destinations. A good one

@@ -146,8 +146,12 @@ func TestQRSetsItsOwnColors(t *testing.T) {
 	}
 }
 
-// Repeating the colors for every cell makes the output ten times the size for
-// the same picture, and a terminal has to draw all of it.
+// Repeating the colors for every cell makes the output several times the size
+// for the same picture, and a terminal has to draw all of it.
+//
+// What is counted is color changes, not escape sequences: a change writes both
+// a foreground and a background, so escapes come in pairs and comparing those
+// against cells measures the wrong thing.
 func TestQRSharesColorsAcrossRuns(t *testing.T) {
 	code, err := qr.Encode("vless://example", qr.M)
 	if err != nil {
@@ -157,11 +161,11 @@ func TestQRSharesColorsAcrossRuns(t *testing.T) {
 	lines := qrLines(code)
 	cells := (code.Size + 2*quietZone) * len(lines)
 
-	var escapes int
+	var changes int
 	for _, line := range lines {
-		escapes += strings.Count(line, "\x1b[")
+		changes += strings.Count(line, darkAbove) + strings.Count(line, lightAbove)
 	}
-	if escapes >= cells {
-		t.Errorf("%d escape sequences for %d cells, want runs to share one", escapes, cells)
+	if changes >= cells {
+		t.Errorf("%d color changes for %d cells, want runs to share one", changes, cells)
 	}
 }

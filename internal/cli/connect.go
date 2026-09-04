@@ -119,6 +119,9 @@ func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bo
 		return err
 	}
 
+	// Blank lines above and below stand in for the border the code is drawn
+	// with less of, and keep it clear of the shell prompt.
+	fmt.Fprintln(out)
 	if err := printQR(out, uri); err != nil {
 		return err
 	}

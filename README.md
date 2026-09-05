@@ -380,9 +380,44 @@ included, and DNS with them. Creating an interface and rewriting the routing
 table needs root:
 
 ```sh
-vpncli server connect 3 --tun -o ~/vpn.json
-sudo sing-box run -c ~/vpn.json
+vpncli tun up 3
 ```
+
+```
+Routing this machine through vpncli-ams3-0a910d (203.0.113.10, ams3).
+Ctrl-C brings it down.
+
+Password:
+```
+
+That writes the config, runs sing-box against it, and brings the tunnel down
+when you interrupt it, so there is no file or process left to remember.
+`--detach` leaves it up after the command returns:
+
+```sh
+vpncli tun up 3 --detach
+vpncli tun status      # up through vpncli-ams3-0a910d (203.0.113.10, ams3) for 8m
+vpncli tun down
+```
+
+With no id it takes the most recently configured server, which after a
+provision or a rotation is the one you meant.
+
+`sing-box` has to be installed and at least 1.12: the generated config uses
+route rule actions and the typed DNS format, and on anything older it does not
+fail to connect, it fails to parse - with a message about an unknown field that
+says nothing about the version. Both are checked before a config is written.
+
+`status` and `down` find the tunnel by the config it is running against rather
+than by remembering a process id, because the id of what gets started is not
+the id of what survives: sudo forks a monitor and the process that was spawned
+is gone within milliseconds. That also means a tunnel started by hand is found,
+reported and stoppable. It needs `sing-box` installed and
+your password, because creating a network interface and rewriting the routing
+table needs root.
+
+`vpncli server connect 3 --tun -o ~/vpn.json` still writes the config if you
+would rather run the client yourself.
 
 Both carry the same tunnel and the same credentials; the difference is only
 where traffic enters it.
@@ -477,6 +512,10 @@ vpncli server connect 3     the link, QR or client config to reach one
 vpncli server bootstrap 3   configure one that is not configured yet
 vpncli server rotate 3      replace one with a fresh server
 vpncli server destroy 3     delete one and forget it
+
+vpncli tun up 3             route this machine through a server
+vpncli tun status           whether the tunnel is up, and since when
+vpncli tun down             stop it
 
 vpncli sync                 reconcile local state against the provider
 ```

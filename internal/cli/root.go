@@ -25,6 +25,7 @@ time.`,
 		newProvidersCommand(),
 		newServerCommand(),
 		newSyncCommand(),
+		newTunCommand(),
 		newVersionCommand(),
 	)
 

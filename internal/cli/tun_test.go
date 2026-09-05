@@ -26,9 +26,19 @@ type fakeRunner struct {
 	live    []int
 	runErr  error
 	stopErr error
+
+	// version is what the client prints; versionErr is it failing to answer.
+	version    string
+	versionErr error
 }
 
-func newFakeRunner() *fakeRunner { return &fakeRunner{} }
+func newFakeRunner() *fakeRunner {
+	return &fakeRunner{version: "sing-box version 1.14.0\n\nEnvironment: go1.26.7 darwin/arm64\n"}
+}
+
+func (f *fakeRunner) Version(context.Context) (string, error) {
+	return f.version, f.versionErr
+}
 
 func (f *fakeRunner) Look(name string) (string, error) {
 	if f.missing {
@@ -419,5 +429,104 @@ func TestTunStatusFindsATunnelItDidNotStart(t *testing.T) {
 	}
 	if len(f.stopped) != 1 || f.stopped[0] != 9001 {
 		t.Errorf("stopped %v, want the process that was found", f.stopped)
+	}
+}
+
+// A config using route rule actions and the typed DNS format does not fail to
+// connect on an old client, it fails to parse - and the message says nothing
+// about the version.
+func TestTunUpRefusesAnOldSingBox(t *testing.T) {
+	tn, f := tunneling(t)
+	f.version = "sing-box version 1.9.3\n"
+
+	_, err := up(t, tn, 1, false)
+	if !errors.Is(err, ErrOldSingBox) {
+		t.Fatalf("got %v, want ErrOldSingBox", err)
+	}
+	for _, want := range []string{"1.9.3", minSingBox} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+	if _, err := os.Stat(tn.configPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Error("a config was written for a client that cannot read it")
+	}
+}
+
+func TestTunUpAcceptsANewEnoughSingBox(t *testing.T) {
+	for _, version := range []string{"1.12.0", "1.14.0", "2.0.0", "1.12.0-beta.3"} {
+		tn, f := tunneling(t)
+		f.version = "sing-box version " + version + "\n"
+
+		if _, err := up(t, tn, 1, false); err != nil {
+			t.Errorf("sing-box %s was refused: %v", version, err)
+		}
+	}
+}
+
+// A build from source, or a distribution doing its own thing, should not stop
+// a tunnel over a string nobody can parse.
+func TestTunUpCarriesOnWhenTheVersionCannotBeRead(t *testing.T) {
+	for _, printed := range []string{"", "some other program entirely\n"} {
+		tn, f := tunneling(t)
+		f.version = printed
+
+		out, err := up(t, tn, 1, false)
+		if err != nil {
+			t.Fatalf("version %q stopped the tunnel: %v", printed, err)
+		}
+		if !strings.Contains(out, "Could not read") {
+			t.Errorf("nothing says the version was unreadable:\n%s", out)
+		}
+	}
+}
+
+func TestTunUpCarriesOnWhenTheVersionCannotBeAsked(t *testing.T) {
+	tn, f := tunneling(t)
+	f.versionErr = errors.New("exec: signal killed")
+
+	out, err := up(t, tn, 1, false)
+	if err != nil {
+		t.Fatalf("a version that could not be asked stopped the tunnel: %v", err)
+	}
+	if !strings.Contains(out, "Could not ask") {
+		t.Errorf("nothing says the version could not be asked:\n%s", out)
+	}
+}
+
+func TestParseVersion(t *testing.T) {
+	tests := map[string]string{
+		"sing-box version 1.14.0\n\nEnvironment: go1.26.7": "1.14.0",
+		"sing-box version v1.12.3":                         "1.12.3",
+		"sing-box version 1.12.0-beta.3":                   "1.12.0-beta.3",
+		"":                                                 "",
+		"nothing useful here":                              "",
+	}
+	for printed, want := range tests {
+		if got := parseVersion(printed); got != want {
+			t.Errorf("parseVersion(%q) = %q, want %q", printed, got, want)
+		}
+	}
+}
+
+func TestOlder(t *testing.T) {
+	tests := []struct {
+		have, want string
+		older      bool
+	}{
+		{have: "1.9.3", want: "1.12.0", older: true},
+		{have: "1.12.0", want: "1.12.0"},
+		{have: "1.14.0", want: "1.12.0"},
+		{have: "2.0.0", want: "1.12.0"},
+		{have: "1.11.9", want: "1.12.0", older: true},
+		// A pre-release of the version we need reads the same config.
+		{have: "1.12.0-beta.3", want: "1.12.0"},
+		// Shorter than what is asked for is older: 1.12 is not 1.12.1.
+		{have: "1.12", want: "1.12.1", older: true},
+	}
+	for _, tt := range tests {
+		if got := older(tt.have, tt.want); got != tt.older {
+			t.Errorf("older(%q, %q) = %v, want %v", tt.have, tt.want, got, tt.older)
+		}
 	}
 }

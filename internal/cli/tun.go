@@ -120,10 +120,10 @@ the internet where it thinks you are.`,
 
 // runTunUp brings the tunnel up.
 func runTunUp(ctx context.Context, in io.Reader, out io.Writer, t *tunnel, id int64, detach bool) error {
-	// The client is somebody else's program and has to be there before
-	// anything else is done: a config written for a client that is not
-	// installed is a file nobody asked for.
-	if _, err := t.run.Look(singBox); err != nil {
+	// The client is somebody else's program and has to be there, and new
+	// enough, before anything else is done: a config written for a client
+	// that cannot run it is a file nobody asked for.
+	if err := t.usable(ctx, out); err != nil {
 		return err
 	}
 

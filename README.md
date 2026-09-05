@@ -403,6 +403,11 @@ vpncli tun down
 With no id it takes the most recently configured server, which after a
 provision or a rotation is the one you meant.
 
+`sing-box` has to be installed and at least 1.12: the generated config uses
+route rule actions and the typed DNS format, and on anything older it does not
+fail to connect, it fails to parse - with a message about an unknown field that
+says nothing about the version. Both are checked before a config is written.
+
 `status` and `down` find the tunnel by the config it is running against rather
 than by remembering a process id, because the id of what gets started is not
 the id of what survives: sudo forks a monitor and the process that was spawned

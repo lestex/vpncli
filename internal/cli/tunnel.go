@@ -21,8 +21,20 @@ import (
 // wrapping someone else's binary is the whole of what `vpncli tun` does.
 const singBox = "sing-box"
 
+// minSingBox is the oldest client a generated config works on.
+//
+// The tun config uses route rule actions, which arrived in 1.11, and the
+// typed DNS server format, which arrived in 1.12. On anything older it does
+// not fail to connect, it fails to parse - with a message about an unknown
+// field that says nothing about the version being the problem.
+const minSingBox = "1.12.0"
+
 // ErrNoSingBox is returned when the client is not installed.
 var ErrNoSingBox = errors.New("sing-box is not installed")
+
+// ErrOldSingBox is returned when it is installed but too old to read what
+// this generates.
+var ErrOldSingBox = errors.New("sing-box is too old")
 
 // ErrNotRunning is returned by down and status when no tunnel is up.
 var ErrNotRunning = errors.New("no tunnel is running")
@@ -37,6 +49,8 @@ type runner interface {
 	Run(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error
 	// Start runs a command in the background.
 	Start(ctx context.Context, out io.Writer, name string, args ...string) error
+	// Version reports the client's version, as it prints it.
+	Version(ctx context.Context) (string, error)
 	// Matching returns the processes whose command line contains needle.
 	//
 	// The tunnel is found this way rather than by a remembered process id,
@@ -191,6 +205,14 @@ func (system) Start(_ context.Context, out io.Writer, name string, args ...strin
 	return cmd.Process.Release()
 }
 
+func (system) Version(ctx context.Context) (string, error) {
+	out, err := exec.CommandContext(ctx, singBox, "version").Output()
+	if err != nil {
+		return "", fmt.Errorf("asking %s its version: %w", singBox, err)
+	}
+	return string(out), nil
+}
+
 func (system) Matching(ctx context.Context, needle string) ([]int, error) {
 	// ps rather than pgrep: both exist on macOS and Linux, but ps is the one
 	// with a stable output format to parse.
@@ -226,4 +248,85 @@ func (system) Stop(ctx context.Context, out io.Writer, pids []int) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout, cmd.Stderr = out, out
 	return cmd.Run()
+}
+
+// usable checks that the client is installed and new enough to read what this
+// generates.
+//
+// A version that cannot be parsed is not an error: it is a build from source
+// or a distribution doing its own thing, and refusing to run over a string
+// nobody can read would be worse than trying.
+func (t *tunnel) usable(ctx context.Context, out io.Writer) error {
+	if _, err := t.run.Look(singBox); err != nil {
+		return err
+	}
+
+	printed, err := t.run.Version(ctx)
+	if err != nil {
+		fmt.Fprintf(out, "Could not ask %s its version: %v\n", singBox, err)
+		return nil
+	}
+
+	found := parseVersion(printed)
+	if found == "" {
+		fmt.Fprintf(out, "Could not read the %s version from %q, carrying on.\n",
+			singBox, strings.TrimSpace(firstLine(printed)))
+		return nil
+	}
+	if older(found, minSingBox) {
+		return fmt.Errorf("%w: %s is %s and this needs %s or newer, because the config it writes uses route rule actions and the typed DNS format",
+			ErrOldSingBox, singBox, found, minSingBox)
+	}
+	return nil
+}
+
+// parseVersion pulls the number out of what the client prints, which is a
+// line like "sing-box version 1.14.0".
+func parseVersion(printed string) string {
+	fields := strings.Fields(firstLine(printed))
+	for i, field := range fields {
+		if field == "version" && i+1 < len(fields) {
+			return strings.TrimPrefix(fields[i+1], "v")
+		}
+	}
+	return ""
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
+}
+
+// older compares two dotted versions. A pre-release suffix is ignored: a
+// 1.12.0 beta reads the same config a 1.12.0 release does.
+func older(have, want string) bool {
+	haveParts := versionParts(have)
+	wantParts := versionParts(want)
+
+	for i := range wantParts {
+		if i >= len(haveParts) {
+			return true
+		}
+		if haveParts[i] != wantParts[i] {
+			return haveParts[i] < wantParts[i]
+		}
+	}
+	return false
+}
+
+// versionParts splits a version into numbers, stopping at anything that is
+// not one.
+func versionParts(version string) []int {
+	version, _, _ = strings.Cut(version, "-")
+	version, _, _ = strings.Cut(version, "+")
+
+	var parts []int
+	for _, field := range strings.Split(version, ".") {
+		n, err := strconv.Atoi(field)
+		if err != nil {
+			break
+		}
+		parts = append(parts, n)
+	}
+	return parts
 }

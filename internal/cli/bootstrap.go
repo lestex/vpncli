@@ -117,6 +117,13 @@ func bootstrapServer(ctx context.Context, store *state.Store, cfg config.Config,
 	// site can grow a longer certificate between one server and the next. A
 	// server built on a site REALITY cannot relay looks perfectly healthy and
 	// refuses every client, so it is worth one TLS connection to find out now.
+	//
+	// Only a verdict stops the bootstrap. Anything else - a name that will not
+	// resolve here, a connection that times out - is this machine's network and
+	// not the site's: the vantage point that matters is the server's, and the
+	// people this program is for are the likeliest of all to be sitting behind
+	// a network that cannot reach the site their server will hide behind. The
+	// wizard says as much and takes the host anyway; this does the same.
 	if _, err := check(ctx, host); errors.Is(err, reality.ErrUnsuitable) {
 		return fmt.Errorf("%w: run `vpncli providers init` and pick another", err)
 	}

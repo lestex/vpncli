@@ -746,6 +746,32 @@ func TestWaitReadyStopsWhenContextEnds(t *testing.T) {
 	}
 }
 
+// A droplet that stays active without ever answering on 22 is a real failure -
+// and one that bills for as long as it is waited on, so the wait ends.
+func TestWaitReadyGivesUp(t *testing.T) {
+	d := droplet(1001, "vpncli-fra1-a1b2", "active")
+	f := &fakeDroplets{
+		gets:        []reply{ok(&d), ok(&d)},
+		sshRefusals: 100,
+	}
+
+	p := newTestProvider(f)
+	// Two polls' worth of readyTimeout, so the cap is reached without
+	// scripting the whole ten minutes.
+	p.pollInterval = readyTimeout / 2
+
+	_, err := p.WaitReady(context.Background(), "1001")
+	if err == nil {
+		t.Fatal("a droplet that never answers should not be waited on forever")
+	}
+	if !strings.Contains(err.Error(), "destroy") {
+		t.Errorf("got %v, want an error that says how to get rid of the droplet", err)
+	}
+	if len(f.gets) != 0 {
+		t.Errorf("gave up with %d polls left unspent", len(f.gets))
+	}
+}
+
 func TestWaitReadyPropagatesNotFound(t *testing.T) {
 	f := &fakeDroplets{gets: []reply{failure(http.StatusNotFound, "")}}
 

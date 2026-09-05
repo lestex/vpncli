@@ -39,6 +39,13 @@ const (
 	// filtered port fails fast instead of stretching the polling cadence.
 	dialTimeout = 3 * time.Second
 
+	// readyTimeout bounds the whole wait. Boot is a minute, so this is a
+	// generous outside; what it is really for is the droplet that stays active
+	// and never answers on 22 - a broken image, networking that never came up -
+	// which without a limit is polled for as long as the terminal is left open,
+	// billing the whole time.
+	readyTimeout = 10 * time.Minute
+
 	// defaultMaxAttempts caps how many times one API call is tried.
 	defaultMaxAttempts = 5
 )
@@ -206,8 +213,12 @@ func (p *Provider) DeleteInstance(ctx context.Context, id string) error {
 // is answering on it. "active" on its own is not enough: DigitalOcean reports
 // it once the hypervisor has the VM, seconds before the guest finishes
 // booting, and bootstrap would connect into a refused port.
+//
+// It gives up after readyTimeout rather than waiting out a droplet that is
+// never going to answer. The droplet is left alone: it is already recorded, so
+// it can be looked at and destroyed rather than quietly abandoned.
 func (p *Provider) WaitReady(ctx context.Context, id string) (provider.VPSInstance, error) {
-	for {
+	for left := p.readyAttempts(); ; left-- {
 		inst, err := p.GetInstance(ctx, id)
 		if err != nil {
 			return provider.VPSInstance{}, err
@@ -222,10 +233,27 @@ func (p *Provider) WaitReady(ctx context.Context, id string) (provider.VPSInstan
 			}
 		}
 
+		if left <= 1 {
+			return provider.VPSInstance{}, fmt.Errorf(
+				"droplet %s is still %q after %s and is not answering on SSH: it exists and is billing, so `vpncli server list` and `vpncli server destroy` are the way out",
+				id, inst.Status, readyTimeout)
+		}
+
 		if err := p.sleep(ctx, p.pollInterval); err != nil {
 			return provider.VPSInstance{}, fmt.Errorf("waiting for droplet %s: %w", id, err)
 		}
 	}
+}
+
+// readyAttempts is how many polls fit in readyTimeout at the configured
+// cadence. Counting polls rather than watching the clock keeps the bound the
+// same whoever is doing the waiting, including tests, where sleeping costs no
+// time at all.
+func (p *Provider) readyAttempts() int {
+	if p.pollInterval <= 0 {
+		return 1
+	}
+	return max(int(readyTimeout/p.pollInterval), 1)
 }
 
 // probeSSH opens and drops a connection to the SSH port, bounded so an

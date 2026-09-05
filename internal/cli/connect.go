@@ -142,7 +142,16 @@ func runConnect(ctx context.Context, out io.Writer, id int64, asQR, asSingBox bo
 func writeConfig(out io.Writer, path string, content []byte, mode client.Mode) error {
 	// 0600 because this file is the key to the server. Shell redirection would
 	// have left it readable by anyone with an account here.
-	if err := os.WriteFile(path, content, 0o600); err != nil {
+	//
+	// The mode is applied rather than only requested: a mode passed to open is
+	// what a newly created file gets, and does nothing to a file that already
+	// exists. Writing over yesterday's config, or over something the shell left
+	// behind, would otherwise keep whatever mode that file was carrying.
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if err := writeSecret(file, content); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 
@@ -157,4 +166,19 @@ func writeConfig(out io.Writer, path string, content []byte, mode client.Mode) e
 	fmt.Fprintf(out, "\nThat is a proxy on 127.0.0.1:%d. Only what is pointed at it goes through\n", client.SocksPort)
 	fmt.Fprintf(out, "the tunnel; `--tun` covers the whole machine instead.\n")
 	return nil
+}
+
+// writeSecret narrows an open file to 0600 and fills it. The chmod comes
+// before the write, so there is no moment where the credentials are on disk
+// under a mode somebody else can read.
+func writeSecret(file *os.File, content []byte) error {
+	defer file.Close()
+
+	if err := file.Chmod(0o600); err != nil {
+		return err
+	}
+	if _, err := file.Write(content); err != nil {
+		return err
+	}
+	return file.Close()
 }

@@ -304,6 +304,30 @@ func TestConnectWritesTheConfigUnreadableByOthers(t *testing.T) {
 	}
 }
 
+// Writing over a file that is already there has to narrow it: an old config
+// left world readable by a shell redirect, or a file somebody else created, is
+// exactly the one being replaced with fresh credentials.
+func TestConnectNarrowsAFileThatAlreadyExists(t *testing.T) {
+	srv := connectable(t)
+	path := filepath.Join(t.TempDir(), "vpn.json")
+
+	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("planting a readable file: %v", err)
+	}
+
+	if _, err := connectTo(t, srv.ID, false, true, client.Proxy, path); err != nil {
+		t.Fatalf("connect -o: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("%s is %04o after being written over, want 0600", path, perm)
+	}
+}
+
 // Running a tun config without root creates no interface and tunnels nothing,
 // which is a hard failure to recognize. The command that writes it says so.
 func TestConnectSaysHowToRunWhatItWrote(t *testing.T) {

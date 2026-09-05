@@ -127,8 +127,11 @@ func runTunUp(ctx context.Context, in io.Reader, out io.Writer, t *tunnel, id in
 		return err
 	}
 
-	if running, err := t.running(); err == nil {
-		return fmt.Errorf("a tunnel through server %d is already up: `vpncli tun down` stops it", running.Server)
+	if _, running, err := t.running(ctx); err == nil {
+		if running.Server != 0 {
+			return fmt.Errorf("a tunnel through server %d is already up: `vpncli tun down` stops it", running.Server)
+		}
+		return errors.New("a tunnel is already up: `vpncli tun down` stops it")
 	}
 
 	store, err := openStore()
@@ -166,11 +169,10 @@ func runTunUp(ctx context.Context, in io.Reader, out io.Writer, t *tunnel, id in
 		return nil
 	}
 
-	pid, err := t.run.Start(ctx, out, "sudo", args...)
-	if err != nil {
+	if err := t.run.Start(ctx, out, "sudo", args...); err != nil {
 		return fmt.Errorf("starting %s: %w", singBox, err)
 	}
-	if err := t.save(record{PID: pid, Server: srv.ID, Started: time.Now()}); err != nil {
+	if err := t.save(record{Server: srv.ID, Started: time.Now()}); err != nil {
 		return err
 	}
 
@@ -180,7 +182,7 @@ func runTunUp(ctx context.Context, in io.Reader, out io.Writer, t *tunnel, id in
 
 // runTunDown stops a detached tunnel.
 func runTunDown(ctx context.Context, out io.Writer, t *tunnel) error {
-	running, err := t.running()
+	pids, running, err := t.running(ctx)
 	if errors.Is(err, ErrNotRunning) {
 		fmt.Fprintln(out, "no tunnel is running")
 		return nil
@@ -189,26 +191,37 @@ func runTunDown(ctx context.Context, out io.Writer, t *tunnel) error {
 		return err
 	}
 
-	if err := t.run.Stop(ctx, out, running.PID); err != nil {
+	if err := t.run.Stop(ctx, out, pids); err != nil {
 		return fmt.Errorf("stopping the tunnel: %w", err)
 	}
 	if err := t.forget(); err != nil {
 		return err
 	}
 
+	if running.Started.IsZero() {
+		fmt.Fprintln(out, "tunnel down")
+		return nil
+	}
 	fmt.Fprintf(out, "tunnel down after %s\n", took(time.Since(running.Started)))
 	return nil
 }
 
 // runTunStatus says what is up.
 func runTunStatus(ctx context.Context, out io.Writer, t *tunnel) error {
-	running, err := t.running()
+	_, running, err := t.running(ctx)
 	if errors.Is(err, ErrNotRunning) {
 		fmt.Fprintln(out, "down")
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+
+	if running.Server == 0 {
+		// Running, but not started by this command - so there is nothing to
+		// say about which server or since when.
+		fmt.Fprintf(out, "up, from a tunnel this command did not start (%s)\n", t.configPath())
+		return nil
 	}
 
 	store, err := openStore()

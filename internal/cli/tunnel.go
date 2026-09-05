@@ -35,12 +35,17 @@ type runner interface {
 	Look(name string) (string, error)
 	// Run starts a command and waits for it, wired to the terminal.
 	Run(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error
-	// Start runs a command in the background and returns its process id.
-	Start(ctx context.Context, out io.Writer, name string, args ...string) (int, error)
-	// Alive reports whether a process is still there.
-	Alive(pid int) bool
-	// Stop ends a process that is running as root.
-	Stop(ctx context.Context, out io.Writer, pid int) error
+	// Start runs a command in the background.
+	Start(ctx context.Context, out io.Writer, name string, args ...string) error
+	// Matching returns the processes whose command line contains needle.
+	//
+	// The tunnel is found this way rather than by a remembered process id,
+	// because the id of what gets started is not the id of what survives:
+	// sudo forks a monitor and the process we spawned exits within
+	// milliseconds, leaving a recorded id that belongs to nothing.
+	Matching(ctx context.Context, needle string) ([]int, error)
+	// Stop ends processes that are running as root.
+	Stop(ctx context.Context, out io.Writer, pids []int) error
 }
 
 // tunnel is the client process and the files that describe it.
@@ -68,16 +73,17 @@ func (t *tunnel) configPath() string { return filepath.Join(t.dir, "tun.json") }
 // recordPath holds what is running: the process id and the server it is for.
 func (t *tunnel) recordPath() string { return filepath.Join(t.dir, "tun.pid") }
 
-// record is what a running tunnel left behind.
+// record is what a running tunnel left behind. It holds what cannot be
+// recovered by looking at the process list: which server the tunnel is to, and
+// when it went up.
 type record struct {
-	PID     int
 	Server  int64
 	Started time.Time
 }
 
 // save writes the record of a running tunnel.
 func (t *tunnel) save(r record) error {
-	line := fmt.Sprintf("%d %d %d\n", r.PID, r.Server, r.Started.Unix())
+	line := fmt.Sprintf("%d %d\n", r.Server, r.Started.Unix())
 	if err := os.WriteFile(t.recordPath(), []byte(line), 0o600); err != nil {
 		return fmt.Errorf("recording the tunnel: %w", err)
 	}
@@ -92,24 +98,20 @@ func (t *tunnel) load() (record, error) {
 	}
 
 	fields := strings.Fields(string(raw))
-	if len(fields) != 3 {
+	if len(fields) != 2 {
 		return record{}, fmt.Errorf("%s is not a tunnel record", t.recordPath())
 	}
 
-	pid, err := strconv.Atoi(fields[0])
+	server, err := strconv.ParseInt(fields[0], 10, 64)
 	if err != nil {
 		return record{}, fmt.Errorf("%s is not a tunnel record: %w", t.recordPath(), err)
 	}
-	server, err := strconv.ParseInt(fields[1], 10, 64)
-	if err != nil {
-		return record{}, fmt.Errorf("%s is not a tunnel record: %w", t.recordPath(), err)
-	}
-	started, err := strconv.ParseInt(fields[2], 10, 64)
+	started, err := strconv.ParseInt(fields[1], 10, 64)
 	if err != nil {
 		return record{}, fmt.Errorf("%s is not a tunnel record: %w", t.recordPath(), err)
 	}
 
-	return record{PID: pid, Server: server, Started: time.Unix(started, 0)}, nil
+	return record{Server: server, Started: time.Unix(started, 0)}, nil
 }
 
 // forget removes the record.
@@ -121,21 +123,34 @@ func (t *tunnel) forget() error {
 	return nil
 }
 
-// running returns the record of a live tunnel. A record whose process is gone
-// is cleared: sing-box killed by hand, or a machine that was rebooted, should
-// not leave `vpncli tun status` insisting something is up.
-func (t *tunnel) running() (record, error) {
-	r, err := t.load()
+// running reports the live tunnel: the processes carrying it, and what is
+// known about it from the record.
+//
+// The processes are the truth. A record left by a tunnel that has since been
+// killed by hand, or by a machine that rebooted, is cleared rather than
+// believed - and a tunnel running without a record is still reported, because
+// it is still routing this machine.
+func (t *tunnel) running(ctx context.Context) ([]int, record, error) {
+	pids, err := t.run.Matching(ctx, t.configPath())
 	if err != nil {
-		return record{}, err
+		return nil, record{}, err
 	}
-	if !t.run.Alive(r.PID) {
+	if len(pids) == 0 {
 		if err := t.forget(); err != nil {
-			return record{}, err
+			return nil, record{}, err
 		}
-		return record{}, ErrNotRunning
+		return nil, record{}, ErrNotRunning
 	}
-	return r, nil
+
+	r, err := t.load()
+	if errors.Is(err, ErrNotRunning) {
+		// Up, but started by something other than this command.
+		return pids, record{}, nil
+	}
+	if err != nil {
+		return nil, record{}, err
+	}
+	return pids, r, nil
 }
 
 // system is the real runner.
@@ -155,8 +170,11 @@ func (system) Run(ctx context.Context, in io.Reader, out io.Writer, name string,
 	return cmd.Run()
 }
 
-func (system) Start(ctx context.Context, out io.Writer, name string, args ...string) (int, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+func (system) Start(_ context.Context, out io.Writer, name string, args ...string) error {
+	// Deliberately not CommandContext: the point of a detached tunnel is to
+	// outlive the command that started it, and a context canceled as this
+	// process exits would take the tunnel with it.
+	cmd := exec.Command(name, args...)
 	// The password prompt has to reach the terminal, so sudo keeps stdin
 	// until it is done; everything after that goes to the log.
 	cmd.Stdin = os.Stdin
@@ -166,27 +184,45 @@ func (system) Start(ctx context.Context, out io.Writer, name string, args ...str
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
-		return 0, err
+		return err
 	}
-	return cmd.Process.Pid, nil
+	// Nothing waits for it. The child is reparented when this process exits,
+	// which is what makes it a background tunnel rather than a zombie.
+	return cmd.Process.Release()
 }
 
-func (system) Alive(pid int) bool {
-	process, err := os.FindProcess(pid)
+func (system) Matching(ctx context.Context, needle string) ([]int, error) {
+	// ps rather than pgrep: both exist on macOS and Linux, but ps is the one
+	// with a stable output format to parse.
+	out, err := exec.CommandContext(ctx, "ps", "-ax", "-o", "pid=,command=").Output()
 	if err != nil {
-		return false
+		return nil, fmt.Errorf("listing processes: %w", err)
 	}
-	// Signal 0 asks the kernel about the process without touching it. A
-	// permission error is a yes: the process exists and belongs to root,
-	// which is exactly what a tunnel looks like from here.
-	err = process.Signal(syscall.Signal(0))
-	return err == nil || errors.Is(err, os.ErrPermission)
+
+	var pids []int
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if !strings.Contains(line, needle) {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.Fields(line)[0])
+		if err != nil {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
 }
 
-func (system) Stop(ctx context.Context, out io.Writer, pid int) error {
-	// The tunnel runs as root, so ending it needs root. Killing the process
-	// group takes sudo and sing-box together.
-	cmd := exec.CommandContext(ctx, "sudo", "kill", "-TERM", strconv.Itoa(-pid))
+func (system) Stop(ctx context.Context, out io.Writer, pids []int) error {
+	// The tunnel runs as root, so ending it needs root. Every process
+	// carrying it goes at once: sing-box and the sudo wrappers above it,
+	// which would otherwise be left waiting on a child that is gone.
+	args := []string{"kill", "-TERM"}
+	for _, pid := range pids {
+		args = append(args, strconv.Itoa(pid))
+	}
+
+	cmd := exec.CommandContext(ctx, "sudo", args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout, cmd.Stderr = out, out
 	return cmd.Run()

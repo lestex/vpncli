@@ -401,7 +401,13 @@ vpncli tun down
 ```
 
 With no id it takes the most recently configured server, which after a
-provision or a rotation is the one you meant. It needs `sing-box` installed and
+provision or a rotation is the one you meant.
+
+`status` and `down` find the tunnel by the config it is running against rather
+than by remembering a process id, because the id of what gets started is not
+the id of what survives: sudo forks a monitor and the process that was spawned
+is gone within milliseconds. That also means a tunnel started by hand is found,
+reported and stoppable. It needs `sing-box` installed and
 your password, because creating a network interface and rewriting the routing
 table needs root.
 

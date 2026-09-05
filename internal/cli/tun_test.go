@@ -22,15 +22,13 @@ type fakeRunner struct {
 	started []string
 	stopped []int
 
-	pid     int
-	alive   map[int]bool
+	// live are the processes carrying a tunnel, as `ps` would show them.
+	live    []int
 	runErr  error
 	stopErr error
 }
 
-func newFakeRunner() *fakeRunner {
-	return &fakeRunner{pid: 4242, alive: map[int]bool{}}
-}
+func newFakeRunner() *fakeRunner { return &fakeRunner{} }
 
 func (f *fakeRunner) Look(name string) (string, error) {
 	if f.missing {
@@ -44,23 +42,25 @@ func (f *fakeRunner) Run(_ context.Context, _ io.Reader, _ io.Writer, name strin
 	return f.runErr
 }
 
-func (f *fakeRunner) Start(_ context.Context, _ io.Writer, name string, args ...string) (int, error) {
+func (f *fakeRunner) Start(_ context.Context, _ io.Writer, name string, args ...string) error {
 	f.started = append(f.started, name+" "+strings.Join(args, " "))
 	if f.runErr != nil {
-		return 0, f.runErr
+		return f.runErr
 	}
-	f.alive[f.pid] = true
-	return f.pid, nil
+	// What a real one leaves behind: sudo, its monitor, and sing-box, none of
+	// them the process that was actually spawned.
+	f.live = []int{4242, 4243, 4244}
+	return nil
 }
 
-func (f *fakeRunner) Alive(pid int) bool { return f.alive[pid] }
+func (f *fakeRunner) Matching(context.Context, string) ([]int, error) { return f.live, nil }
 
-func (f *fakeRunner) Stop(_ context.Context, _ io.Writer, pid int) error {
+func (f *fakeRunner) Stop(_ context.Context, _ io.Writer, pids []int) error {
 	if f.stopErr != nil {
 		return f.stopErr
 	}
-	f.stopped = append(f.stopped, pid)
-	delete(f.alive, pid)
+	f.stopped = append(f.stopped, pids...)
+	f.live = nil
 	return nil
 }
 
@@ -167,12 +167,17 @@ func TestTunUpDetached(t *testing.T) {
 		t.Fatalf("started %v and ran %v, want it started in the background", f.started, f.ran)
 	}
 
-	running, err := tn.running()
+	pids, running, err := tn.running(context.Background())
 	if err != nil {
 		t.Fatalf("nothing was recorded: %v", err)
 	}
-	if running.PID != f.pid || running.Server != 1 {
-		t.Errorf("recorded %+v, want pid %d for server 1", running, f.pid)
+	if running.Server != 1 {
+		t.Errorf("recorded %+v, want server 1", running)
+	}
+	// Every process carrying the tunnel, not the one that was spawned: sudo
+	// forks a monitor and the spawned process is gone within milliseconds.
+	if len(pids) != 3 {
+		t.Errorf("found %v, want every process carrying the tunnel", pids)
 	}
 	if !strings.Contains(out, "vpncli tun down") {
 		t.Errorf("nothing says how to stop it:\n%s", out)
@@ -191,8 +196,8 @@ func TestTunDown(t *testing.T) {
 		t.Fatalf("tun down: %v", err)
 	}
 
-	if len(f.stopped) != 1 || f.stopped[0] != f.pid {
-		t.Errorf("stopped %v, want the recorded process", f.stopped)
+	if len(f.stopped) != 3 {
+		t.Errorf("stopped %v, want every process carrying the tunnel", f.stopped)
 	}
 	if _, err := os.Stat(tn.recordPath()); !errors.Is(err, os.ErrNotExist) {
 		t.Error("the record outlived the tunnel")
@@ -251,7 +256,7 @@ func TestTunStatusForgetsAProcessThatIsGone(t *testing.T) {
 	if _, err := up(t, tn, 1, true); err != nil {
 		t.Fatalf("tun up: %v", err)
 	}
-	delete(f.alive, f.pid) // killed from somewhere else
+	f.live = nil // killed from somewhere else
 
 	var out bytes.Buffer
 	if err := runTunStatus(context.Background(), &out, tn); err != nil {
@@ -333,10 +338,10 @@ func TestTunUpWithNothingToConnectTo(t *testing.T) {
 func TestTunStatusWithTheServerGone(t *testing.T) {
 	tn, _ := tunneling(t)
 
-	if err := tn.save(record{PID: 4242, Server: 99, Started: time.Now()}); err != nil {
+	if err := tn.save(record{Server: 99, Started: time.Now()}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	tn.run.(*fakeRunner).alive[4242] = true
+	tn.run.(*fakeRunner).live = []int{4242}
 
 	var out bytes.Buffer
 	if err := runTunStatus(context.Background(), &out, tn); err != nil {
@@ -354,7 +359,7 @@ func TestTunRecordRoundTrip(t *testing.T) {
 		t.Errorf("got %v for a missing record, want ErrNotRunning", err)
 	}
 
-	want := record{PID: 17, Server: 3, Started: time.Now().Truncate(time.Second)}
+	want := record{Server: 3, Started: time.Now().Truncate(time.Second)}
 	if err := tn.save(want); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -363,7 +368,56 @@ func TestTunRecordRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got.PID != want.PID || got.Server != want.Server || !got.Started.Equal(want.Started) {
+	if got.Server != want.Server || !got.Started.Equal(want.Started) {
 		t.Errorf("loaded %+v, want %+v", got, want)
+	}
+}
+
+// The process this command spawns is sudo, which forks a monitor and exits.
+// Remembering its id would mean status reporting a live tunnel as down - and,
+// worse, clearing the record of one still routing the machine.
+func TestTunFindsTheTunnelByItsConfigRatherThanAPID(t *testing.T) {
+	tn, f := tunneling(t)
+
+	if _, err := up(t, tn, 1, true); err != nil {
+		t.Fatalf("tun up: %v", err)
+	}
+
+	// Whatever was spawned is long gone; the tunnel is carried by processes
+	// with entirely different ids.
+	f.live = []int{9001, 9002}
+
+	var out bytes.Buffer
+	if err := runTunStatus(context.Background(), &out, tn); err != nil {
+		t.Fatalf("tun status: %v", err)
+	}
+	if !strings.Contains(out.String(), "up through") {
+		t.Errorf("status = %q, want it to find the tunnel", out.String())
+	}
+	if _, err := os.Stat(tn.recordPath()); err != nil {
+		t.Error("the record of a running tunnel was cleared")
+	}
+}
+
+// A tunnel started by hand still routes this machine, so it is reported and
+// can be stopped.
+func TestTunStatusFindsATunnelItDidNotStart(t *testing.T) {
+	tn, f := tunneling(t)
+	f.live = []int{9001}
+
+	var out bytes.Buffer
+	if err := runTunStatus(context.Background(), &out, tn); err != nil {
+		t.Fatalf("tun status: %v", err)
+	}
+	if !strings.Contains(out.String(), "up") {
+		t.Errorf("status = %q, want it to report the tunnel", out.String())
+	}
+
+	var down bytes.Buffer
+	if err := runTunDown(context.Background(), &down, tn); err != nil {
+		t.Fatalf("tun down: %v", err)
+	}
+	if len(f.stopped) != 1 || f.stopped[0] != 9001 {
+		t.Errorf("stopped %v, want the process that was found", f.stopped)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -65,6 +66,26 @@ type runner interface {
 	// Interface finds the network interface carrying addr, or reports
 	// ErrNoInterface.
 	Interface(addr netip.Addr) (link, error)
+	// Locate asks the internet where this machine's traffic arrives from.
+	Locate(ctx context.Context) (exit, error)
+}
+
+// exitTraceURL is asked where traffic leaves from. Cloudflare's trace answers
+// with the address a request arrived from and the country that address is in,
+// needs no account, and is reached by IP: there is no lookup to leak, and the
+// answer is the IPv4 address, which is the one the server is recorded by.
+const exitTraceURL = "https://1.1.1.1/cdn-cgi/trace"
+
+// exitTimeout bounds the lookup. Through a tunnel to another continent a
+// round trip is a quarter of a second, so this only runs out on one that is
+// not carrying anything.
+const exitTimeout = 5 * time.Second
+
+// exit is where traffic arrives from, as the internet sees it.
+type exit struct {
+	IP string
+	// Country is the ISO 3166 code, "NL", or empty when it is not known.
+	Country string
 }
 
 // ErrNoInterface is returned when no interface carries the tunnel's address.
@@ -302,6 +323,54 @@ func (system) Interface(addr netip.Addr) (link, error) {
 		}
 	}
 	return link{}, ErrNoInterface
+}
+
+func (system) Locate(ctx context.Context) (exit, error) {
+	ctx, cancel := context.WithTimeout(ctx, exitTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, exitTraceURL, nil)
+	if err != nil {
+		return exit{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return exit{}, fmt.Errorf("asking %s: %w", exitTraceURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return exit{}, fmt.Errorf("asking %s: %s", exitTraceURL, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return exit{}, fmt.Errorf("reading %s: %w", exitTraceURL, err)
+	}
+	return parseTrace(string(body))
+}
+
+// parseTrace reads Cloudflare's trace, which is key=value lines.
+func parseTrace(body string) (exit, error) {
+	var e exit
+	for line := range strings.SplitSeq(body, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "ip":
+			e.IP = value
+		case "loc":
+			// XX is Cloudflare for not knowing.
+			if value != "XX" {
+				e.Country = value
+			}
+		}
+	}
+	if e.IP == "" {
+		return exit{}, fmt.Errorf("%s did not say where the request came from", exitTraceURL)
+	}
+	return e, nil
 }
 
 // usable checks that the client is installed and new enough to read what this

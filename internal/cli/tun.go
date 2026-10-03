@@ -104,14 +104,17 @@ func newTunStatusCommand() *cobra.Command {
 		Use:   "status",
 		Short: "Say whether the tunnel is up",
 		Long: `Report whether a tunnel is running, through which server, and since when,
-and the network interface it created: its name, addresses, MTU and whether it
-is up.
+the network interface it created, and where traffic actually leaves from.
 
-It reads local state, the process list and the interface table, so it is
-instant and works offline. A sing-box with no interface is reported as routing
-nothing, which is what one started without root does. It does not check that
-traffic is actually flowing - for that, ask something on the internet where it
-thinks you are.`,
+The interface line gives its name, addresses, MTU and whether it is up. A
+sing-box with no interface is reported as routing nothing, which is what one
+started without root does.
+
+The exit line asks Cloudflare (` + exitTraceURL + `) which address
+and country a request arrives from, and checks it against the server's. That
+is the one request status makes, and it goes through the tunnel like everything
+else; an exit that is not the server means the tunnel is up and carrying
+nothing.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			t, err := newTunnel()
@@ -222,24 +225,30 @@ func runTunStatus(ctx context.Context, out io.Writer, t *tunnel) error {
 		return err
 	}
 
-	if err := printTunServer(ctx, out, t, running); err != nil {
+	serverIP, err := printTunServer(ctx, out, t, running)
+	if err != nil {
 		return err
 	}
-	return printTunInterface(out, t)
+	if err := printTunInterface(out, t); err != nil {
+		return err
+	}
+	printTunExit(ctx, out, t, serverIP)
+	return nil
 }
 
-// printTunServer says which server the tunnel goes through, and since when.
-func printTunServer(ctx context.Context, out io.Writer, t *tunnel, running record) error {
+// printTunServer says which server the tunnel goes through, and since when,
+// and returns its address, or nothing when that is not known.
+func printTunServer(ctx context.Context, out io.Writer, t *tunnel, running record) (string, error) {
 	if running.Server == 0 {
 		// Running, but not started by this command - so there is nothing to
 		// say about which server or since when.
 		fmt.Fprintf(out, "up, from a tunnel this command did not start (%s)\n", t.configPath())
-		return nil
+		return "", nil
 	}
 
 	store, err := openStore()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer store.Close()
 
@@ -249,12 +258,42 @@ func printTunServer(ctx context.Context, out io.Writer, t *tunnel, running recor
 		// is what destroying one from another terminal looks like.
 		fmt.Fprintf(out, "up through server %d, which is no longer in local state, for %s\n",
 			running.Server, took(time.Since(running.Started)))
-		return nil
+		return "", nil
 	}
 
 	fmt.Fprintf(out, "up through %s (%s, %s) for %s\n",
 		srv.Name, srv.IPv4, srv.Region, took(time.Since(running.Started)))
-	return nil
+	return srv.IPv4, nil
+}
+
+// printTunExit says where the internet thinks this machine is. It is the one
+// line that shows traffic actually going through the tunnel rather than a
+// process and an interface that merely exist: an exit address that is not the
+// server's is a tunnel that is up and carrying nothing.
+//
+// A lookup that fails is reported rather than returned. The rest of the status
+// is still true, and a tunnel that cannot reach the internet is worth seeing
+// next to it, not instead of it.
+func printTunExit(ctx context.Context, out io.Writer, t *tunnel, serverIP string) {
+	e, err := t.run.Locate(ctx)
+	if err != nil {
+		fmt.Fprintf(out, "exit unknown: %v\n", err)
+		return
+	}
+
+	where := e.IP
+	if e.Country != "" {
+		where += " in " + e.Country
+	}
+	switch {
+	case serverIP == "":
+		fmt.Fprintf(out, "exit %s\n", where)
+	case e.IP == serverIP:
+		fmt.Fprintf(out, "exit %s, the server's address\n", where)
+	default:
+		fmt.Fprintf(out, "exit %s, which is not the server (%s): traffic is not going through the tunnel\n",
+			where, serverIP)
+	}
 }
 
 // printTunInterface describes the interface sing-box created. A running

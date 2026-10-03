@@ -411,13 +411,23 @@ vpncli tun down
 
 ```
 up through vpncli-ams3-0a910d (203.0.113.10, ams3) for 8m
-interface utun5: 172.19.0.1/30, fdfe:dcba:9876::1/126, mtu 9000, up
+interface utun5: 172.19.0.1/30, fdfe:dcba:9876::1/126, mtu 65535, up
+exit 203.0.113.10 in NL, the server's address
 ```
 
 The interface is found by the tunnel's own address, because its name is the
 system's choice. A sing-box running with no interface carrying that address is
 reported as routing nothing - which is what one started without root looks
 like, and otherwise looks exactly like a tunnel that works.
+
+The exit line is where the internet thinks you are. Status asks Cloudflare's
+trace endpoint, by IP so no DNS lookup goes anywhere, which address and country
+the request arrived from, and checks the address against the server's. A
+process and an interface only show that a tunnel exists; this shows it carrying
+traffic. An exit that is not the server is a tunnel that is up and routing
+nothing, and a lookup that times out is one that cannot reach the internet at
+all. It is the one request status makes, so it takes a round trip rather than
+being instant.
 
 With no id it takes the most recently configured server, which after a
 provision or a rotation is the one you meant.
@@ -533,7 +543,7 @@ vpncli server rotate 3      replace one with a fresh server
 vpncli server destroy 3     delete one and forget it
 
 vpncli tun up 3             route this machine through a server
-vpncli tun status           whether the tunnel is up, since when, and on which interface
+vpncli tun status           whether the tunnel is up, on which interface, and the exit country
 vpncli tun down             stop it
 
 vpncli sync                 reconcile local state against the provider

@@ -36,12 +36,17 @@ type fakeRunner struct {
 	// being none.
 	link    link
 	linkErr error
+
+	// exit is where traffic arrives from; exitErr is the lookup failing.
+	exit    exit
+	exitErr error
 }
 
 func newFakeRunner() *fakeRunner {
 	return &fakeRunner{
 		version: "sing-box version 1.14.0\n\nEnvironment: go1.26.7 darwin/arm64\n",
 		link:    link{Name: "utun9", MTU: 9000, Up: true, Addrs: []string{"172.19.0.1/30"}},
+		exit:    exit{IP: "203.0.113.10", Country: "DE"},
 	}
 }
 
@@ -71,6 +76,8 @@ func (f *fakeRunner) Start(_ context.Context, _ io.Writer, name string, args ...
 	f.live = []int{4242, 4243, 4244}
 	return nil
 }
+
+func (f *fakeRunner) Locate(context.Context) (exit, error) { return f.exit, f.exitErr }
 
 func (f *fakeRunner) Interface(netip.Addr) (link, error) { return f.link, f.linkErr }
 
@@ -642,5 +649,93 @@ func TestSystemInterfaceFindsAnAddress(t *testing.T) {
 
 	if _, err := (system{}).Interface(netip.MustParseAddr("192.0.2.255")); !errors.Is(err, ErrNoInterface) {
 		t.Errorf("err = %v, want ErrNoInterface for an address nothing has", err)
+	}
+}
+
+func tunStatus(t *testing.T, tn *tunnel) string {
+	t.Helper()
+
+	var out bytes.Buffer
+	if err := runTunStatus(context.Background(), &out, tn); err != nil {
+		t.Fatalf("tun status: %v", err)
+	}
+	return out.String()
+}
+
+func TestTunStatusSaysWhereTrafficLeaves(t *testing.T) {
+	tn, _ := tunneling(t)
+	if _, err := up(t, tn, 1, true); err != nil {
+		t.Fatalf("tun up: %v", err)
+	}
+
+	want := "exit 203.0.113.10 in DE, the server's address"
+	if got := tunStatus(t, tn); !strings.Contains(got, want) {
+		t.Errorf("status = %q, want it to say %q", got, want)
+	}
+}
+
+// Up, with an interface, and leaving from somewhere else: the tunnel is
+// carrying nothing, and only asking the outside can tell.
+func TestTunStatusCatchesTrafficNotInTheTunnel(t *testing.T) {
+	tn, f := tunneling(t)
+	if _, err := up(t, tn, 1, true); err != nil {
+		t.Fatalf("tun up: %v", err)
+	}
+	f.exit = exit{IP: "198.51.100.7", Country: "US"}
+
+	got := tunStatus(t, tn)
+	for _, want := range []string{"198.51.100.7 in US", "not going through the tunnel"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status = %q, want it to mention %q", got, want)
+		}
+	}
+}
+
+// A failed lookup is part of the status, not the end of it.
+func TestTunStatusWhenTheExitCannotBeFound(t *testing.T) {
+	tn, f := tunneling(t)
+	if _, err := up(t, tn, 1, true); err != nil {
+		t.Fatalf("tun up: %v", err)
+	}
+	f.exitErr = errors.New("context deadline exceeded")
+
+	got := tunStatus(t, tn)
+	for _, want := range []string{"up through", "interface utun9", "exit unknown: context deadline exceeded"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status = %q, want it to mention %q", got, want)
+		}
+	}
+}
+
+// A tunnel started by hand has no server to compare against, so the exit is
+// reported as it is.
+func TestTunStatusExitWithoutAServer(t *testing.T) {
+	tn, f := tunneling(t)
+	f.live = []int{9001}
+
+	got := tunStatus(t, tn)
+	if !strings.Contains(got, "exit 203.0.113.10 in DE\n") {
+		t.Errorf("status = %q, want the exit with nothing to compare it to", got)
+	}
+}
+
+func TestParseTrace(t *testing.T) {
+	trace := "fl=522f106\nh=1.1.1.1\nip=209.38.105.249\nts=1790991942.000\ncolo=AMS\nloc=NL\ntls=TLSv1.3\n"
+
+	got, err := parseTrace(trace)
+	if err != nil {
+		t.Fatalf("parseTrace: %v", err)
+	}
+	if want := (exit{IP: "209.38.105.249", Country: "NL"}); got != want {
+		t.Errorf("parseTrace = %+v, want %+v", got, want)
+	}
+
+	got, err = parseTrace("ip=192.0.2.1\nloc=XX\n")
+	if err != nil || got.Country != "" {
+		t.Errorf("parseTrace with loc=XX = %+v, %v, want no country", got, err)
+	}
+
+	if _, err := parseTrace("<html>captive portal</html>"); err == nil {
+		t.Error("parseTrace accepted a page with no address in it")
 	}
 }

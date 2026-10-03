@@ -12,6 +12,8 @@ One static Go binary. No Terraform, no domain, no CDN.
 > with, and `vpncli server rotate` replaces it with a fresh one that shares nothing
 > with it. See [Roadmap](#roadmap).
 
+Detailed guides, one per part of the workflow, are in [docs/](docs/README.md).
+
 ## Why it is built this way
 
 **Direct IP, no DNS.** REALITY works by making the server's TLS handshake

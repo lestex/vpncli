@@ -530,3 +530,40 @@ func TestOlder(t *testing.T) {
 		}
 	}
 }
+
+func TestNoteDeadTunnel(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		through int64
+		gone    int64
+		want    bool
+	}{
+		{"through the destroyed server", 99, 99, true},
+		{"through a server still in state", 1, 1, false},
+		{"through some other server", 1, 99, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tn, f := tunneling(t)
+			if err := tn.save(record{Server: tc.through, Started: time.Now()}); err != nil {
+				t.Fatalf("save: %v", err)
+			}
+			f.live = []int{4242}
+
+			var out bytes.Buffer
+			noteDeadTunnel(context.Background(), &out, tn, tc.gone)
+			if got := strings.Contains(out.String(), "vpncli tun down"); got != tc.want {
+				t.Errorf("note = %q, want a note: %v", out.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestNoteDeadTunnelWithNothingRunning(t *testing.T) {
+	tn, _ := tunneling(t)
+
+	var out bytes.Buffer
+	noteDeadTunnel(context.Background(), &out, tn, 99)
+	if out.Len() != 0 {
+		t.Errorf("note = %q, want nothing", out.String())
+	}
+}

@@ -48,8 +48,14 @@ Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 			if err != nil {
 				return fmt.Errorf("%q is not a server id: `vpncli server list` shows them", args[0])
 			}
-			return runRotate(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(),
-				openProvider, dialSSH, reality.Check, id, yes)
+			if err := runRotate(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(),
+				openProvider, dialSSH, reality.Check, id, yes); err != nil {
+				return err
+			}
+			if t, err := newTunnel(); err == nil {
+				noteDeadTunnel(cmd.Context(), cmd.OutOrStdout(), t, id)
+			}
+			return nil
 		},
 	}
 

@@ -244,6 +244,30 @@ func runTunStatus(ctx context.Context, out io.Writer, t *tunnel) error {
 	return nil
 }
 
+// noteDeadTunnel says so when the tunnel on this machine runs through a server
+// that is no longer in state. It stays up and carries nothing, which looks
+// exactly like the network having gone. Best effort: a check that fails
+// should not turn a destroy that worked into an error.
+func noteDeadTunnel(ctx context.Context, out io.Writer, t *tunnel, id int64) {
+	_, running, err := t.running(ctx)
+	if err != nil || running.Server != id {
+		return
+	}
+
+	store, err := openStore()
+	if err != nil {
+		return
+	}
+	defer store.Close()
+
+	if _, err := store.Get(ctx, id); !errors.Is(err, state.ErrNotFound) {
+		return
+	}
+
+	fmt.Fprintf(out, "The tunnel on this machine still goes through it and carries nothing: "+
+		"`vpncli tun down`, then `vpncli tun up`.\n")
+}
+
 // chooseServer resolves the id a tunnel is for. With none given it takes the
 // most recently configured server, which after a provision or a rotation is
 // the one meant.

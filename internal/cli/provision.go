@@ -29,8 +29,8 @@ wait: a server that exists but is not in state is invisible and still billed.
 So an interrupted wait leaves something ` + "`vpncli server destroy`" + ` can clean up, and
 ` + "`vpncli sync`" + ` picks it up on any machine.
 
-The server comes up as a stock OS image with the configured SSH key installed.
-Installing Xray-core and the REALITY camouflage is v0.8.0.
+Once it has booted, the bootstrap installs Xray-core and the REALITY
+camouflage over SSH. If that fails halfway, ` + "`vpncli server bootstrap`" + ` finishes it.
 
 Requires DIGITALOCEAN_TOKEN or DIGITALOCEAN_ACCESS_TOKEN to be set.`,
 		Args: cobra.NoArgs,

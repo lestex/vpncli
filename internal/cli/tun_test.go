@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/netip"
 	"os"
 	"strings"
 	"testing"
@@ -30,10 +31,18 @@ type fakeRunner struct {
 	// version is what the client prints; versionErr is it failing to answer.
 	version    string
 	versionErr error
+
+	// link is the interface the tunnel's address is on; linkErr is there
+	// being none.
+	link    link
+	linkErr error
 }
 
 func newFakeRunner() *fakeRunner {
-	return &fakeRunner{version: "sing-box version 1.14.0\n\nEnvironment: go1.26.7 darwin/arm64\n"}
+	return &fakeRunner{
+		version: "sing-box version 1.14.0\n\nEnvironment: go1.26.7 darwin/arm64\n",
+		link:    link{Name: "utun9", MTU: 9000, Up: true, Addrs: []string{"172.19.0.1/30"}},
+	}
 }
 
 func (f *fakeRunner) Version(context.Context) (string, error) {
@@ -62,6 +71,8 @@ func (f *fakeRunner) Start(_ context.Context, _ io.Writer, name string, args ...
 	f.live = []int{4242, 4243, 4244}
 	return nil
 }
+
+func (f *fakeRunner) Interface(netip.Addr) (link, error) { return f.link, f.linkErr }
 
 func (f *fakeRunner) Matching(context.Context, string) ([]int, error) { return f.live, nil }
 
@@ -528,5 +539,108 @@ func TestOlder(t *testing.T) {
 		if got := older(tt.have, tt.want); got != tt.older {
 			t.Errorf("older(%q, %q) = %v, want %v", tt.have, tt.want, got, tt.older)
 		}
+	}
+}
+
+func TestNoteDeadTunnel(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		through int64
+		gone    int64
+		want    bool
+	}{
+		{"through the destroyed server", 99, 99, true},
+		{"through a server still in state", 1, 1, false},
+		{"through some other server", 1, 99, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tn, f := tunneling(t)
+			if err := tn.save(record{Server: tc.through, Started: time.Now()}); err != nil {
+				t.Fatalf("save: %v", err)
+			}
+			f.live = []int{4242}
+
+			var out bytes.Buffer
+			noteDeadTunnel(context.Background(), &out, tn, tc.gone)
+			if got := strings.Contains(out.String(), "vpncli tun down"); got != tc.want {
+				t.Errorf("note = %q, want a note: %v", out.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestNoteDeadTunnelWithNothingRunning(t *testing.T) {
+	tn, _ := tunneling(t)
+
+	var out bytes.Buffer
+	noteDeadTunnel(context.Background(), &out, tn, 99)
+	if out.Len() != 0 {
+		t.Errorf("note = %q, want nothing", out.String())
+	}
+}
+
+func TestTunStatusNamesTheInterface(t *testing.T) {
+	tn, _ := tunneling(t)
+	if _, err := up(t, tn, 1, true); err != nil {
+		t.Fatalf("tun up: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runTunStatus(context.Background(), &out, tn); err != nil {
+		t.Fatalf("tun status: %v", err)
+	}
+	want := "interface utun9: 172.19.0.1/30, mtu 9000, up"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("status = %q, want it to say %q", out.String(), want)
+	}
+}
+
+// sing-box run without root starts, logs, and creates nothing. That is the
+// one failure status can see without sending traffic anywhere.
+func TestTunStatusWithNoInterface(t *testing.T) {
+	tn, f := tunneling(t)
+	if _, err := up(t, tn, 1, true); err != nil {
+		t.Fatalf("tun up: %v", err)
+	}
+	f.linkErr = ErrNoInterface
+
+	var out bytes.Buffer
+	if err := runTunStatus(context.Background(), &out, tn); err != nil {
+		t.Fatalf("tun status: %v", err)
+	}
+	if !strings.Contains(out.String(), "nothing is being routed") {
+		t.Errorf("status = %q, want it to say nothing is routed", out.String())
+	}
+}
+
+func TestTunStatusWithTheInterfaceDown(t *testing.T) {
+	tn, f := tunneling(t)
+	if _, err := up(t, tn, 1, true); err != nil {
+		t.Fatalf("tun up: %v", err)
+	}
+	f.link.Up = false
+
+	var out bytes.Buffer
+	if err := runTunStatus(context.Background(), &out, tn); err != nil {
+		t.Fatalf("tun status: %v", err)
+	}
+	if !strings.Contains(out.String(), "utun9") || !strings.Contains(out.String(), "down, so nothing") {
+		t.Errorf("status = %q, want the interface reported as down", out.String())
+	}
+}
+
+// The status reads the real interface table, so it has to find whatever the
+// tunnel address is on. Loopback is on every machine.
+func TestSystemInterfaceFindsAnAddress(t *testing.T) {
+	l, err := system{}.Interface(netip.MustParseAddr("127.0.0.1"))
+	if err != nil {
+		t.Fatalf("Interface: %v", err)
+	}
+	if l.Name == "" || !l.Up {
+		t.Errorf("link = %+v, want the loopback interface, up", l)
+	}
+
+	if _, err := (system{}).Interface(netip.MustParseAddr("192.0.2.255")); !errors.Is(err, ErrNoInterface) {
+		t.Errorf("err = %v, want ErrNoInterface for an address nothing has", err)
 	}
 }

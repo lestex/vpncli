@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -102,11 +103,15 @@ func newTunStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Say whether the tunnel is up",
-		Long: `Report whether a tunnel is running, through which server, and since when.
+		Long: `Report whether a tunnel is running, through which server, and since when,
+and the network interface it created: its name, addresses, MTU and whether it
+is up.
 
-It reads local state and one process, so it is instant and works offline. It
-does not check that traffic is actually flowing - for that, ask something on
-the internet where it thinks you are.`,
+It reads local state, the process list and the interface table, so it is
+instant and works offline. A sing-box with no interface is reported as routing
+nothing, which is what one started without root does. It does not check that
+traffic is actually flowing - for that, ask something on the internet where it
+thinks you are.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			t, err := newTunnel()
@@ -217,6 +222,14 @@ func runTunStatus(ctx context.Context, out io.Writer, t *tunnel) error {
 		return err
 	}
 
+	if err := printTunServer(ctx, out, t, running); err != nil {
+		return err
+	}
+	return printTunInterface(out, t)
+}
+
+// printTunServer says which server the tunnel goes through, and since when.
+func printTunServer(ctx context.Context, out io.Writer, t *tunnel, running record) error {
 	if running.Server == 0 {
 		// Running, but not started by this command - so there is nothing to
 		// say about which server or since when.
@@ -242,6 +255,52 @@ func runTunStatus(ctx context.Context, out io.Writer, t *tunnel) error {
 	fmt.Fprintf(out, "up through %s (%s, %s) for %s\n",
 		srv.Name, srv.IPv4, srv.Region, took(time.Since(running.Started)))
 	return nil
+}
+
+// printTunInterface describes the interface sing-box created. A running
+// sing-box with no interface is the one failure status can actually see: it
+// was started without root, and is routing nothing.
+func printTunInterface(out io.Writer, t *tunnel) error {
+	l, err := t.run.Interface(client.TunAddr())
+	if errors.Is(err, ErrNoInterface) {
+		fmt.Fprintf(out, "but no interface has %s on it, so nothing is being routed: sing-box needs root to create one\n",
+			client.TunAddr())
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	how := "up"
+	if !l.Up {
+		how = "down, so nothing is being routed"
+	}
+	fmt.Fprintf(out, "interface %s: %s, mtu %d, %s\n", l.Name, strings.Join(l.Addrs, ", "), l.MTU, how)
+	return nil
+}
+
+// noteDeadTunnel says so when the tunnel on this machine runs through a server
+// that is no longer in state. It stays up and carries nothing, which looks
+// exactly like the network having gone. Best effort: a check that fails
+// should not turn a destroy that worked into an error.
+func noteDeadTunnel(ctx context.Context, out io.Writer, t *tunnel, id int64) {
+	_, running, err := t.running(ctx)
+	if err != nil || running.Server != id {
+		return
+	}
+
+	store, err := openStore()
+	if err != nil {
+		return
+	}
+	defer store.Close()
+
+	if _, err := store.Get(ctx, id); !errors.Is(err, state.ErrNotFound) {
+		return
+	}
+
+	fmt.Fprintf(out, "The tunnel on this machine still goes through it and carries nothing: "+
+		"`vpncli tun down`, then `vpncli tun up`.\n")
 }
 
 // chooseServer resolves the id a tunnel is for. With none given it takes the

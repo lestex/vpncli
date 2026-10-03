@@ -152,8 +152,8 @@ func LoadFrom(path string) (Config, error) {
 }
 
 // Save writes the config to the default path, creating the directory. The file
-// is written 0600 and the directory 0700: no secrets live here today, but
-// v0.8.0 adds REALITY key material and the permissions should already be right.
+// is written 0600 and the directory 0700. It holds no secrets, but it names
+// the account's servers and the key that logs in to them.
 func (c *Config) Save() error {
 	path, err := Path()
 	if err != nil {

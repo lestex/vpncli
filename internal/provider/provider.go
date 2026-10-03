@@ -1,6 +1,6 @@
 // Package provider defines the VPS provider abstraction. Every supported
-// cloud (DigitalOcean first, Hetzner/Vultr/Linode later) implements
-// VPSProvider so the rest of vpncli never learns which one it is talking to.
+// cloud implements VPSProvider so the rest of vpncli never learns which one
+// it is talking to.
 package provider
 
 import (
@@ -63,7 +63,7 @@ type CreateOptions struct {
 	Image  string
 
 	// SSHKeyIDs are provider-side identifiers of keys to install for root.
-	// Bootstrap (v0.8.0) connects over SSH, so at least one is required.
+	// The bootstrap connects over SSH, so at least one is required.
 	SSHKeyIDs []string
 
 	// IPv6 asks for a routable IPv6 address as well as the IPv4 one. A

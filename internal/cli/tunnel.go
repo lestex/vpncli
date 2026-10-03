@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +62,20 @@ type runner interface {
 	Matching(ctx context.Context, needle string) ([]int, error)
 	// Stop ends processes that are running as root.
 	Stop(ctx context.Context, out io.Writer, pids []int) error
+	// Interface finds the network interface carrying addr, or reports
+	// ErrNoInterface.
+	Interface(addr netip.Addr) (link, error)
+}
+
+// ErrNoInterface is returned when no interface carries the tunnel's address.
+var ErrNoInterface = errors.New("no interface carries the tunnel's address")
+
+// link is the interface sing-box created, as the system sees it.
+type link struct {
+	Name  string
+	MTU   int
+	Up    bool
+	Addrs []string
 }
 
 // tunnel is the client process and the files that describe it.
@@ -248,6 +264,44 @@ func (system) Stop(ctx context.Context, out io.Writer, pids []int) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout, cmd.Stderr = out, out
 	return cmd.Run()
+}
+
+func (system) Interface(addr netip.Addr) (link, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return link{}, fmt.Errorf("listing interfaces: %w", err)
+	}
+
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		found := false
+		var shown []string
+		for _, a := range addrs {
+			prefix, err := netip.ParsePrefix(a.String())
+			if err != nil {
+				continue
+			}
+			found = found || prefix.Addr() == addr
+			// Link-local addresses come with every interface and say
+			// nothing about the tunnel.
+			if !prefix.Addr().IsLinkLocalUnicast() {
+				shown = append(shown, prefix.String())
+			}
+		}
+		if found {
+			return link{
+				Name:  iface.Name,
+				MTU:   iface.MTU,
+				Up:    iface.Flags&net.FlagUp != 0,
+				Addrs: shown,
+			}, nil
+		}
+	}
+	return link{}, ErrNoInterface
 }
 
 // usable checks that the client is installed and new enough to read what this

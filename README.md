@@ -405,9 +405,19 @@ when you interrupt it, so there is no file or process left to remember.
 
 ```sh
 vpncli tun up 3 --detach
-vpncli tun status      # up through vpncli-ams3-0a910d (203.0.113.10, ams3) for 8m
+vpncli tun status
 vpncli tun down
 ```
+
+```
+up through vpncli-ams3-0a910d (203.0.113.10, ams3) for 8m
+interface utun5: 172.19.0.1/30, fdfe:dcba:9876::1/126, mtu 9000, up
+```
+
+The interface is found by the tunnel's own address, because its name is the
+system's choice. A sing-box running with no interface carrying that address is
+reported as routing nothing - which is what one started without root looks
+like, and otherwise looks exactly like a tunnel that works.
 
 With no id it takes the most recently configured server, which after a
 provision or a rotation is the one you meant.
@@ -523,7 +533,7 @@ vpncli server rotate 3      replace one with a fresh server
 vpncli server destroy 3     delete one and forget it
 
 vpncli tun up 3             route this machine through a server
-vpncli tun status           whether the tunnel is up, and since when
+vpncli tun status           whether the tunnel is up, since when, and on which interface
 vpncli tun down             stop it
 
 vpncli sync                 reconcile local state against the provider

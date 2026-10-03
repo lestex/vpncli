@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 
@@ -52,6 +53,10 @@ const (
 	tunIPv4 = "172.19.0.1/30"
 	tunIPv6 = "fdfe:dcba:9876::1/126"
 )
+
+// TunAddr is this machine's end of the Tun mode interface. The interface name
+// is the system's choice, so this is how it is found again once it is up.
+func TunAddr() netip.Addr { return netip.MustParsePrefix(tunIPv4).Addr() }
 
 // tunResolver is where Tun mode sends DNS, through the tunnel. Left to the
 // system, lookups would go out over the local network in plain sight and undo

@@ -43,7 +43,7 @@ matter of taste - see [the wizard](#usage).
 
 ## Install
 
-Requires Go 1.25+.
+Requires Go 1.26+.
 
 ```sh
 git clone https://github.com/lestex/vpncli
